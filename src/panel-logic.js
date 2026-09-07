@@ -2,7 +2,7 @@
  * Pure panel logic, split out of sidepanel.js so it can be tested without a DOM or a
  * chrome runtime.
  *
- * These four functions are where the silent bugs lived: export dropping the player
+ * These are where the silent bugs lived: export dropping the player
  * pool, freshness reading the wrong timestamp, and league routing merging a mock draft
  * into the real board. Rendering bugs are visible; these were not.
  */
@@ -129,6 +129,45 @@ export function routeLeague(msgLeagueId, activeLeagueId) {
   if (!id) return 'ignore';
   if (activeLeagueId == null) return 'adopt';
   return id === Number(activeLeagueId) ? 'accept' : 'offer-switch';
+}
+
+/**
+ * One line summarising autodraft detection for the panel.
+ *
+ * Kept here rather than in `sidepanel.js` for the reason at the top of this file: the
+ * wording is a claim about certainty, and a claim about certainty deserves a test. High
+ * and medium confidence are phrased differently on purpose -- "is autodrafting" and
+ * "may be" are not the same statement, and only the first one moves players off the board.
+ *
+ * Returns null when there is nothing to say, so the caller can hide the line entirely
+ * rather than printing a reassuring "no autodrafters detected" that would be indistinguishable
+ * from detection never having run.
+ */
+export function autodraftSummary(autodraft) {
+  if (!autodraft || !autodraft.teams || !autodraft.teams.length) return null;
+  const confirmed = autodraft.teams.filter((t) => t.confidence === 'high');
+  const suspected = autodraft.teams.filter((t) => t.confidence !== 'high');
+  const names = (list) => list.map((t) => 'team ' + t.teamId).join(', ');
+
+  if (!confirmed.length) {
+    return {
+      tone: 'suspected',
+      text: names(suspected) + ' may be autodrafting — too few straight ranked-list'
+        + ' picks to project from yet.',
+    };
+  }
+
+  const gone = autodraft.projected ? autodraft.projected.length : 0;
+  const bits = [
+    names(confirmed) + (confirmed.length === 1 ? ' is' : ' are') + ' autodrafting',
+    gone === 1 ? '1 player projected taken before your pick' : gone + ' players projected taken before your pick',
+  ];
+  if (autodraft.unknownPicks) {
+    bits.push(autodraft.unknownPicks + (autodraft.unknownPicks === 1 ? ' pick' : ' picks')
+      + ' in between belong to live managers and are not predicted');
+  }
+  if (suspected.length) bits.push(names(suspected) + ' may be too');
+  return { tone: 'confirmed', text: bits.join(' · ') + '.' };
 }
 
 /** Storage keys, namespaced per league so nothing is shared across drafts. */
