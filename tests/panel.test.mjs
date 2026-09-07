@@ -6,8 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildExport, parseImport, freshness, routeLeague, gatePatch, GATES,
-  keyState, keyPool, keyConfig, keySnapshot, DEFAULT_CONFIG,
-} from '../src/panel-logic.js';
+  keyState, keyPool, keyConfig, keySnapshot, DEFAULT_CONFIG, autodraftSummary } from '../src/panel-logic.js';
 import { createState, applySnapshot, manualPick, confirmedCount } from '../src/store.js';
 
 // ------------------------------------------------------------------- export
@@ -168,4 +167,47 @@ test('gatePatch rejects unknown gates and never touches the other gate', () => {
   assert.equal('scoringValidated' in p, false);
   assert.deepEqual(Object.keys(p).sort(), ['transportNotes', 'transportValidated', 'transportValidatedAt']);
   assert.deepEqual(GATES, ['transport', 'scoring']);
+});
+
+test('autodraft summary is hidden when there is nothing to report', () => {
+  assert.equal(autodraftSummary(null), null);
+  assert.equal(autodraftSummary({ teams: [] }), null);
+});
+
+test('a suspected autodrafter is worded as a suspicion, not a finding', () => {
+  const summary = autodraftSummary({
+    teams: [{ teamId: 4, confidence: 'medium' }], projected: [], unknownPicks: 0,
+  });
+  assert.equal(summary.tone, 'suspected');
+  assert.match(summary.text, /team 4 may be autodrafting/);
+  assert.doesNotMatch(summary.text, /projected taken/, 'nothing is declared gone');
+});
+
+test('a confirmed autodrafter reports the count and the gaps it cannot predict', () => {
+  const summary = autodraftSummary({
+    teams: [{ teamId: 3, confidence: 'high' }, { teamId: 7, confidence: 'high' }],
+    projected: [{ playerId: 1 }, { playerId: 2 }, { playerId: 3 }],
+    unknownPicks: 4,
+  });
+  assert.equal(summary.tone, 'confirmed');
+  assert.match(summary.text, /team 3, team 7 are autodrafting/);
+  assert.match(summary.text, /3 players projected taken before your pick/);
+  assert.match(summary.text, /4 picks in between belong to live managers/);
+});
+
+test('a single projected player is not reported as "1 players"', () => {
+  const summary = autodraftSummary({
+    teams: [{ teamId: 3, confidence: 'high' }], projected: [{ playerId: 1 }], unknownPicks: 1,
+  });
+  assert.match(summary.text, /team 3 is autodrafting/);
+  assert.match(summary.text, /1 player projected taken/);
+  assert.match(summary.text, /1 pick in between/);
+});
+
+test('a confirmed autodrafter still mentions the ones only suspected', () => {
+  const summary = autodraftSummary({
+    teams: [{ teamId: 3, confidence: 'high' }, { teamId: 9, confidence: 'medium' }],
+    projected: [], unknownPicks: 0,
+  });
+  assert.match(summary.text, /team 9 may be too/);
 });

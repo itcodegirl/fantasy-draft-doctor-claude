@@ -20,6 +20,10 @@ Recommendations are **deliberately hidden** until scoring validation passes (bel
 Tracking without valuation is useful. Valuation on unvalidated scoring is worse than
 nothing, because it looks authoritative.
 
+Teams being autodrafted by ESPN are detected from their pick pattern, and the players
+they will take before your next turn are named rather than guessed at. See
+**Autodraft detection** below.
+
 The badge in the header tells you which mode you're in: `tracking only` or
 `projections shown`. Note the second one means exactly what it says — ESPN's projected
 points become visible and the recommendation panel becomes available when the league
@@ -121,6 +125,45 @@ league; you record it again on your real league once you have seen it there. The
 shows the live-frame evidence it has for the *current* league beside the transport gate
 so the decision is informed without being automatic.
 
+### Autodraft detection
+
+Managers who do not show up are drafted for them by ESPN, straight down a ranked list.
+That makes their next picks knowable, and every player they will take is a player that
+cannot survive to your next turn. In a 12-team room, two autodrafters remove a large
+share of the uncertainty about who is left when you pick.
+
+Detection is **behavioural**: the board replays the draft and asks, for each team, whether
+it took the top-ranked player it was *allowed* to take. It does not read
+`autoDraftTypeId` off the pick record — that field's shape was observed in a different
+league and has never been seen in this one.
+
+**ESPN does not walk the overall ranked list.** It fills roster slots, so once a team has
+its starting quarterback it stops taking quarterbacks. Matching on overall rank looks
+correct for three or four rounds and then silently breaks, which is exactly when the
+projection is worth the most. `autodraft.js` models eligibility instead: while a starting
+slot is open only positions that fill one qualify, FLEX keeps RB/WR/TE open, and once
+every starter is filled the bench opens to everything except K and DST.
+
+That eligibility rule is a **model, not an observation**, so detection reports a trailing
+streak and a confidence level rather than a boolean:
+
+| Confidence | Trigger | Effect |
+|---|---|---|
+| medium | 3 straight top-eligible picks | Named in the panel. **Never** used to mark a player gone. |
+| high | 4 or more | Feeds the projection; matching players are reported as taken before your next pick. |
+
+The streak is **trailing**, not cumulative, so a manager who arrives late and takes over
+stops being projected on their first off-list pick.
+
+Human picks are not guessed. Picks between now and your turn that belong to live managers
+are counted and reported as unpredicted rather than filled in — the panel says how many.
+A projected player replaces the ADP guess (`unlikely to last to pick N`) with the specific
+claim `team N is autodrafting — projected gone at pick M`.
+
+Known blind spots: a manager who set a pre-draft queue and left autodrafts off *their*
+list, not ESPN's, and will not be detected. That is a false negative, not a false positive.
+Picks that arrive without a `teamId` cannot be attributed to anyone and are skipped.
+
 ---
 
 ## Draft-day sequence
@@ -197,10 +240,10 @@ and `sidePanel` only.
 ## Tests
 
 ```bash
-node --test tests/store.test.mjs tests/panel.test.mjs tests/session.test.mjs
+node --test tests/*.test.mjs
 ```
 
-88 tests.
+111 tests. (Passing the directory rather than the glob fails on some Node builds.)
 
 **`session.test.mjs` (23)** — the panel's *asynchronous* coordination, run against a fake
 storage with an injected delay so transition windows are real rather than instantaneous:
@@ -220,6 +263,14 @@ snapshot idempotency, metadata absorption on agreement, whole-snapshot staleness
 freshness read from completion time rather than apply time, league routing, scoring-gated
 next-pick ranking, expert CSV matching, roster needs, snake picks, and bye-week conflicts.
 
+**`autodraft.js` (17)** — slot inversion against the snake, slot maps built from a later
+round when the first is unattributed, the positional filter that overall-rank matching
+gets wrong, trailing streaks broken by a manager taking over, keepers and unattributed
+picks excluded from evidence, human picks counted as unpredicted rather than guessed,
+medium confidence refusing to declare anyone gone, and the recommender's explanation
+naming the autodrafting team. The wording of the panel's summary line is tested too, in
+`panel.test.mjs`: a claim about certainty deserves a test.
+
 The panel's pure logic lives in `panel-logic.js` specifically so it can be tested without
 a DOM. An earlier build kept that logic inline in `sidepanel.js` with no tests at all,
 which is how six defects shipped while `store.js` had twenty passing tests.
@@ -235,6 +286,11 @@ which is how six defects shipped while `store.js` had twenty passing tests.
 - Transport claims come from ESPN's JS bundle and **have not been observed live**. Phase 1
   exists to settle that.
 - `pointsOverrides` / `autoDraftTypeId` shapes come from a **different league**, not this one.
+  Autodraft detection therefore ignores `autoDraftTypeId` and works from pick behaviour alone.
+- Autodraft **projection has not been observed against a live ESPN autodraft**. The
+  eligibility model is reasoned from ESPN's roster rules, not measured. Watch it in a mock
+  before trusting it: if the panel names a team and its next pick is not the player shown,
+  the model is wrong for this league.
 - This remains an ESPN-projection assistant unless you import an expert CSV. It does not
   fetch or claim a particular publisher's consensus automatically.
 - Disney's Terms of Use prohibit automated access. Absence of documented enforcement is

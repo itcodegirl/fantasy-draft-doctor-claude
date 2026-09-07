@@ -141,6 +141,8 @@ select { flex: 0 0 84px; }
 .empty { padding: 10px 2px; color: var(--muted); font-size: 12px; }
 .recommend-best { font-weight: 650; color: var(--accent); }
 .recommend-why { flex: 1 1 100%; padding-left: 41px; color: var(--muted); font-size: 11px; }
+.autodraft-note { color: var(--accent); }
+.autodraft-note.autodraft-suspected { color: var(--muted); }
 
 .conflict { padding: 7px 0; border-bottom: 1px solid var(--alert-line); }
 .conflict:last-child { border-bottom: none; }

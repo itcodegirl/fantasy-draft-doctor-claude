@@ -10,7 +10,7 @@ import {
   manualPick, undoPick, confirmPending, rejectPending, resolveConflict,
   confirmedPlayerIds, pendingPlayerIds, openConflicts, latencyStats, sortedPicks,
 } from './store.js';
-import { buildExport, parseImport, freshness } from './panel-logic.js';
+import { buildExport, parseImport, freshness, autodraftSummary } from './panel-logic.js';
 import { createSession } from './session.js';
 import { recommend, parseExpertCsv, readSlots, inferDraftSlot } from './recommender.js';
 
@@ -264,9 +264,11 @@ function renderRecommendations() {
     empty.textContent = 'Recommendations will appear here when setup and scoring validation are complete.';
     list.appendChild(empty);
     $('recommendPick').textContent = '';
+    $('autodraftNote').hidden = true;
     return;
   }
   box.hidden = false;
+  renderAutodraftNote(result.autodraft);
   $('recommendPick').textContent = '#' + result.nextPick + ' · round ' + result.round;
   const consensusText = result.expertsAvailable
     ? result.expertsAvailable + ' expert-ranked players blended with the house model'
@@ -291,6 +293,25 @@ function renderRecommendations() {
     row.appendChild(why);
     list.appendChild(row);
   });
+}
+
+/**
+ * The autodraft line is hidden when there is nothing to report. An explicit "no
+ * autodrafters detected" would be indistinguishable from detection not having run,
+ * which is the kind of false reassurance this board is built to avoid.
+ */
+function renderAutodraftNote(autodraft) {
+  const el = $('autodraftNote');
+  const summary = autodraftSummary(autodraft);
+  if (!summary) {
+    el.hidden = true;
+    el.textContent = '';
+    el.classList.remove('autodraft-suspected');
+    return;
+  }
+  el.hidden = false;
+  el.textContent = summary.text;
+  el.classList.toggle('autodraft-suspected', summary.tone === 'suspected');
 }
 
 function renderPlayers() {
