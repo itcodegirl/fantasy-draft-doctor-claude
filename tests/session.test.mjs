@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSession } from '../src/session.js';
-import { KEY_ACTIVE, keyState, keyPool, keyConfig, keySnapshot } from '../src/panel-logic.js';
+import { KEY_ACTIVE, keyState, keyPool, keyConfig, keySnapshot, keyCalibration } from '../src/panel-logic.js';
 import { confirmedPlayerIds, confirmedCount } from '../src/store.js';
 
 /** Fake chrome.storage.local with an injectable delay on get, to widen the race window. */
@@ -553,4 +553,35 @@ test('revoking a gate clears its note and timestamp', async () => {
   assert.equal(s.config.transportValidated, false);
   assert.equal(s.config.transportValidatedAt, null);
   assert.equal(s.config.transportNotes, null);
+});
+
+test('the calibration log is per-league and survives a switch in both directions', async () => {
+  // It rides the same atomic install as state/pool/config. A half-switched session that
+  // scored one league's forecasts against another league's picks would be silently wrong
+  // in exactly the way this file exists to catch.
+  const storage = fakeStorage({
+    [KEY_ACTIVE]: 100,
+    [keyConfig(100)]: { leagueId: 100 },
+    [keyCalibration(100)]: { version: 1, forecasts: [{ targetPick: 13, entries: [], settled: false }] },
+    [keyCalibration(200)]: { version: 1, forecasts: [{ targetPick: 27, entries: [], settled: false }] },
+  }, 5);
+  const s = createSession({ storage, now });
+  await s.init();
+  assert.equal(s.calibration.forecasts[0].targetPick, 13);
+
+  await s.switchTo(200);
+  assert.equal(s.calibration.forecasts[0].targetPick, 27, 'the mock draft log did not follow us');
+
+  s.setCalibration({ version: 1, forecasts: [{ targetPick: 99, entries: [], settled: false }] });
+  await s.switchTo(100);
+  assert.equal(s.calibration.forecasts[0].targetPick, 13, 'league 100 got its own log back');
+  assert.equal(storage.data[keyCalibration(200)].forecasts[0].targetPick, 99,
+    'the departing league persisted its own log, not the destination\'s');
+});
+
+test('a league with no stored calibration log starts empty rather than undefined', async () => {
+  const storage = fakeStorage({ [KEY_ACTIVE]: 300, [keyConfig(300)]: { leagueId: 300 } }, 0);
+  const s = createSession({ storage, now });
+  await s.init();
+  assert.deepEqual(s.calibration.forecasts, []);
 });

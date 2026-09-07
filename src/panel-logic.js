@@ -170,6 +170,49 @@ export function autodraftSummary(autodraft) {
   return { tone: 'confirmed', text: bits.join(' · ') + '.' };
 }
 
+/**
+ * How a survival probability is allowed to be said out loud.
+ *
+ * "About 6 in 10" rather than "63%": two significant figures imply a precision this model
+ * does not have. The buckets at the ends exist so the wording can never reach certainty --
+ * a clamped 0.9999 must not print as "100%", because the certainty channel belongs to the
+ * deterministic autodraft projection and nothing else.
+ */
+export function survivalPhrase(row, nextPick) {
+  if (!row || row.survivalToNextTurn == null) return null;
+  const p = row.survivalToNextTurn;
+  const at = ' still there at #' + nextPick;
+  let odds;
+  if (p >= 0.9) odds = 'better than 9 in 10';
+  else if (p <= 0.1) odds = 'less than 1 in 10';
+  else odds = 'about ' + Math.round(p * 10) + ' in 10';
+  const qualifier = row.survivalBasis === 'need-conditioned'
+    ? ' (need-adjusted)'
+    : ' (ADP only \u2014 opponent rosters not usable)';
+  return odds + at + qualifier;
+}
+
+/**
+ * The line under the recommendation list. Returns null when there is nothing to say, for
+ * the same reason `autodraftSummary` does: an explicit "nothing to report" cannot be told
+ * apart from the model never having run.
+ */
+export function survivalSummary(survival) {
+  if (!survival || survival.basis === 'none' || !survival.modelledPicks) return null;
+  const bits = [survival.modelledPicks + ' pick' + (survival.modelledPicks === 1 ? '' : 's')
+    + ' modelled before your turn'];
+  if (survival.pinnedPicks) {
+    bits.push(survival.pinnedPicks + ' more projected from autodraft');
+  }
+  bits.push(survival.basis === 'need-conditioned'
+    ? 'conditioned on opponent roster needs'
+    : 'ADP only');
+  if (survival.unconditionedPicks) {
+    bits.push(survival.unconditionedPicks + ' of them without a usable team id');
+  }
+  return { text: bits.join(' \u00b7 ') + '.', uncalibrated: true };
+}
+
 /** Storage keys, namespaced per league so nothing is shared across drafts. */
 export const KEY_ACTIVE = 'dc.activeLeague';
 export const keyState = (id) => 'dc.state.' + id;
@@ -177,3 +220,6 @@ export const keyPool = (id) => 'dc.pool.' + id;
 export const keyConfig = (id) => 'dc.config.' + id;
 export const keySnapshot = (id) => 'dc.lastSnapshot.' + id;
 export const keySettings = (id) => 'dc.espnSettings.' + id;
+// Its own key rather than a field on state: a local undo or a league reset must not wipe
+// the record of how well the model has been predicting.
+export const keyCalibration = (id) => 'dc.calibration.' + id;

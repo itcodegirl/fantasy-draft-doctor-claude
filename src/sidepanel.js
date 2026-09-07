@@ -10,7 +10,12 @@ import {
   manualPick, undoPick, confirmPending, rejectPending, resolveConflict,
   confirmedPlayerIds, pendingPlayerIds, openConflicts, latencyStats, sortedPicks,
 } from './store.js';
-import { buildExport, parseImport, freshness, autodraftSummary } from './panel-logic.js';
+import {
+  buildExport, parseImport, freshness, autodraftSummary, survivalPhrase, survivalSummary,
+} from './panel-logic.js';
+import {
+  selectForecastPlayers, openForecast, recordForecast, settleForecasts, brierReport,
+} from './calibration.js';
 import { createSession } from './session.js';
 import { recommend, parseExpertCsv, readSlots, inferDraftSlot } from './recommender.js';
 
@@ -255,6 +260,7 @@ function renderRecommendations() {
     experts: c.expertRanks,
     byeWeeks: c.byeWeeksByPlayerId,
     unavailablePlayerIds,
+    includeMarketBaseline: true,
   });
   if (result.error) {
     box.hidden = false;
@@ -265,10 +271,14 @@ function renderRecommendations() {
     list.appendChild(empty);
     $('recommendPick').textContent = '';
     $('autodraftNote').hidden = true;
+    $('survivalNote').hidden = true;
+    $('calibrationNote').hidden = true;
     return;
   }
   box.hidden = false;
   renderAutodraftNote(result.autodraft);
+  renderSurvivalNote(result.survival);
+  updateCalibration(result);
   $('recommendPick').textContent = '#' + result.nextPick + ' · round ' + result.round;
   const consensusText = result.expertsAvailable
     ? result.expertsAvailable + ' expert-ranked players blended with the house model'
@@ -291,6 +301,13 @@ function renderRecommendations() {
     why.className = 'recommend-why';
     why.textContent = r.why;
     row.appendChild(why);
+    const odds = survivalPhrase(r, result.nextPick);
+    if (odds) {
+      const line = document.createElement('div');
+      line.className = 'recommend-survival';
+      line.textContent = odds;
+      row.appendChild(line);
+    }
     list.appendChild(row);
   });
 }
@@ -312,6 +329,76 @@ function renderAutodraftNote(autodraft) {
   el.hidden = false;
   el.textContent = summary.text;
   el.classList.toggle('autodraft-suspected', summary.tone === 'suspected');
+}
+
+function renderSurvivalNote(survival) {
+  const el = $('survivalNote');
+  const summary = survivalSummary(survival);
+  if (!summary) { el.hidden = true; el.textContent = ''; return; }
+  el.hidden = false;
+  el.textContent = summary.text + ' These are model estimates and have not been'
+    + ' checked against a real draft yet.';
+}
+
+/**
+ * Open a forecast for this turn, settle anything the board has caught up with, and show
+ * the score. The forecast is opened ONCE per target pick -- `recordForecast` refuses a
+ * second one, so re-rendering cannot quietly upgrade a prediction with information it
+ * did not have when it was made.
+ */
+function updateCalibration(result) {
+  const el = $('calibrationNote');
+  const survival = result.survival;
+  let log = session.calibration;
+  if (survival && survival.byPlayerId && result.nextPick) {
+    const scored = selectForecastPlayers(
+      Object.keys(survival.byPlayerId).map((id) => pool()[id]).filter(Boolean),
+    );
+    if (scored.length) {
+      log = recordForecast(log, openForecast({
+        atPick: result.currentPick,
+        targetPick: result.nextPick,
+        basis: survival.basis,
+        madeAt: now(),
+        entries: scored.map((p) => ({
+          playerId: p.id,
+          p: survival.byPlayerId[String(p.id)],
+          pMarket: survival.marketByPlayerId ? survival.marketByPlayerId[String(p.id)] : null,
+        })),
+      }));
+    }
+  }
+  const added = log.forecasts.length !== session.calibration.forecasts.length;
+  const settledLog = settleForecasts(log, sortedPicks(state()));
+  // Only write and flush when something actually changed. `settleForecasts` returns a
+  // fresh object every call, so identity alone would flush on every render -- and a
+  // forecast opened at your turn that never gets flushed is a measurement lost.
+  if (added || settledLog.settled) {
+    session.setCalibration(settledLog.log);
+    save();
+  }
+
+  const report = brierReport(session.calibration);
+  if (!report.n || report.scoredPicks < 3) {
+    el.hidden = report.scoredPicks === 0;
+    el.textContent = report.scoredPicks
+      ? report.scoredPicks + ' of your picks scored so far \u2014 too few to judge the model.'
+      : '';
+    return;
+  }
+  el.hidden = false;
+  const parts = ['survival model: Brier ' + report.brier.toFixed(3) + ' over ' + report.n
+    + ' predictions across ' + report.scoredPicks + ' of your picks'];
+  if (report.skill == null) {
+    parts.push('no ADP baseline captured, so there is nothing to compare it against');
+  } else if (report.skill > 0) {
+    parts.push('ADP-only baseline ' + report.baselineBrier.toFixed(3)
+      + ' (' + Math.round(report.skill * 100) + '% better)');
+  } else {
+    parts.push('ADP-only baseline ' + report.baselineBrier.toFixed(3)
+      + ' \u2014 the need model is doing worse; treat the odds as ADP');
+  }
+  el.textContent = parts.join(' \u00b7 ') + '.';
 }
 
 function renderPlayers() {

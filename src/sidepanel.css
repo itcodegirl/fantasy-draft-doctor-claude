@@ -143,6 +143,8 @@ select { flex: 0 0 84px; }
 .recommend-why { flex: 1 1 100%; padding-left: 41px; color: var(--muted); font-size: 11px; }
 .autodraft-note { color: var(--accent); }
 .autodraft-note.autodraft-suspected { color: var(--muted); }
+.recommend-survival { flex: 1 1 100%; padding-left: 41px; color: var(--muted); font-size: 11px; }
+.calibration-note { color: var(--muted); }
 
 .conflict { padding: 7px 0; border-bottom: 1px solid var(--alert-line); }
 .conflict:last-child { border-bottom: none; }

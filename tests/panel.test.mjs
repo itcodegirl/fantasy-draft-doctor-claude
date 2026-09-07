@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildExport, parseImport, freshness, routeLeague, gatePatch, GATES,
-  keyState, keyPool, keyConfig, keySnapshot, DEFAULT_CONFIG, autodraftSummary } from '../src/panel-logic.js';
+  keyState, keyPool, keyConfig, keySnapshot, DEFAULT_CONFIG, autodraftSummary, survivalPhrase, survivalSummary } from '../src/panel-logic.js';
 import { createState, applySnapshot, manualPick, confirmedCount } from '../src/store.js';
 
 // ------------------------------------------------------------------- export
@@ -210,4 +210,48 @@ test('a confirmed autodrafter still mentions the ones only suspected', () => {
     projected: [], unknownPicks: 0,
   });
   assert.match(summary.text, /team 9 may be too/);
+});
+
+test('a probability never reaches certainty in either direction', () => {
+  // The clamp keeps the numbers off 0 and 1; this keeps the WORDING off them too. The
+  // certainty channel belongs to the deterministic autodraft projection and nothing else.
+  const high = survivalPhrase({ survivalToNextTurn: 0.9999, survivalBasis: 'need-conditioned' }, 40);
+  const low = survivalPhrase({ survivalToNextTurn: 0.0001, survivalBasis: 'need-conditioned' }, 40);
+  assert.match(high, /better than 9 in 10/);
+  assert.doesNotMatch(high, /100%|certain|definitely|will be/);
+  assert.match(low, /less than 1 in 10/);
+  assert.doesNotMatch(low, /0%|gone|no chance/);
+});
+
+test('the odds are stated coarsely, not to two significant figures', () => {
+  const phrase = survivalPhrase({ survivalToNextTurn: 0.634, survivalBasis: 'need-conditioned' }, 198);
+  assert.match(phrase, /about 6 in 10 still there at #198/);
+  assert.doesNotMatch(phrase, /63|0\.6/, 'a precise-looking number implies precision this model lacks');
+});
+
+test('an ADP-only forecast says so rather than implying opponent modelling', () => {
+  const phrase = survivalPhrase({ survivalToNextTurn: 0.5, survivalBasis: 'market-only' }, 40);
+  assert.match(phrase, /ADP only/);
+  assert.doesNotMatch(phrase, /need-adjusted/);
+});
+
+test('a player pinned by autodraft carries no probability at all', () => {
+  // Otherwise one row would make a hard claim and a soft one about the same player.
+  assert.equal(survivalPhrase({ survivalToNextTurn: null, survivalBasis: 'autodraft-projected' }, 40), null);
+  assert.equal(survivalPhrase(null, 40), null);
+});
+
+test('the survival summary reports what was modelled and what was not', () => {
+  const summary = survivalSummary({
+    basis: 'need-conditioned', modelledPicks: 21, pinnedPicks: 1, unconditionedPicks: 2,
+  });
+  assert.match(summary.text, /21 picks modelled/);
+  assert.match(summary.text, /1 more projected from autodraft/);
+  assert.match(summary.text, /2 of them without a usable team id/);
+  assert.equal(summary.uncalibrated, true);
+});
+
+test('the survival summary is hidden when there is nothing to model', () => {
+  assert.equal(survivalSummary(null), null);
+  assert.equal(survivalSummary({ basis: 'none', modelledPicks: 0 }), null);
 });

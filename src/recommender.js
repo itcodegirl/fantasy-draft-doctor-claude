@@ -8,6 +8,7 @@
  */
 
 import { analyzeAutodraft, POSITIONS, FLEX_POSITIONS } from './autodraft.js';
+import { survivalProbabilities } from './survival.js';
 
 const SLOT_TO_POS = {
   0: 'QB', 2: 'RB', 4: 'WR', 6: 'TE', 16: 'DST', 17: 'K', 23: 'FLEX',
@@ -118,7 +119,8 @@ export function recommend(input) {
   const {
     players, picks = [], slots, teams, mySlot, myTeamId, scoringValidated,
     unavailablePlayerIds = [], currentPick: observedCurrentPick = 0,
-    autodraftDetection = true,
+    autodraftDetection = true, survivalModel = true, survivalConditioning = true,
+    includeMarketBaseline = false,
   } = input;
   if (!scoringValidated) return { error: 'Pass the scoring validation gate before using recommendations.' };
   if (!players || !Object.keys(players).length) return { error: 'Player pool not loaded yet.' };
@@ -148,6 +150,45 @@ export function recommend(input) {
     : null;
   const doomedBy = {};
   if (autodraft) for (const row of autodraft.projected) doomedBy[String(row.playerId)] = row;
+  // A SEPARATE channel from `doomedBy`. That one is a deterministic claim about an
+  // autodrafter; this one is a probability about a human, and the two must never be
+  // collapsed into the same sentence. Deliberately does not touch `score` or
+  // `lastsToNextTurn` -- the number ships first, and the calibration harness decides
+  // whether it has earned the right to move the ranking.
+  const survival = (survivalModel && autodraft)
+    ? survivalProbabilities({
+      players, slots, teams,
+      currentPick, nextPick,
+      countsByTeam: autodraft.countsByTeam,
+      slotMap: autodraft.slotMap,
+      slotMapConflicts: autodraft.slotMapConflicts,
+      projected: autodraft.projected,
+      draftedPlayerIds: autodraft.draftedPlayerIds,
+      unavailablePlayerIds,
+      attributedPicks: autodraft.attributedPicks,
+      totalPicks: autodraft.totalPicks,
+      conditioning: survivalConditioning,
+    })
+    : null;
+  // The ADP-only run from the SAME board. The calibration harness needs both numbers
+  // captured at the same moment, because a lone Brier score cannot say whether need
+  // conditioning beat ADP -- only the skill score against this baseline can.
+  if (survival && includeMarketBaseline && survivalConditioning) {
+    survival.marketByPlayerId = survivalProbabilities({
+      players, slots, teams, currentPick, nextPick,
+      countsByTeam: autodraft.countsByTeam,
+      slotMap: autodraft.slotMap,
+      slotMapConflicts: autodraft.slotMapConflicts,
+      projected: autodraft.projected,
+      draftedPlayerIds: autodraft.draftedPlayerIds,
+      unavailablePlayerIds,
+      attributedPicks: autodraft.attributedPicks,
+      totalPicks: autodraft.totalPicks,
+      conditioning: false,
+    }).byPlayerId;
+  } else if (survival) {
+    survival.marketByPlayerId = null;
+  }
   const baseline = rosterLineupPoints(roster, slots);
   const maxProj = Math.max(...available.map((p) => p.proj), 1);
   const expertRanks = available.map((p) => expertRankFor(input.experts, p)).filter((n) => n != null);
@@ -197,6 +238,10 @@ export function recommend(input) {
       takenByAutodraft: takenByAutodraft
         ? { teamId: takenByAutodraft.teamId, overallPickNumber: takenByAutodraft.overallPickNumber }
         : null,
+      survivalToNextTurn: takenByAutodraft || !survival
+        ? null : (survival.byPlayerId[playerId(p)] != null ? survival.byPlayerId[playerId(p)] : null),
+      survivalBasis: takenByAutodraft ? 'autodraft-projected'
+        : (!survival || survival.byPlayerId[playerId(p)] == null ? 'not-modelled' : survival.basis),
       why: explain(p, { starterGain, expertRank, houseScore, byeWeek, byeConflicts, positionNeed, lastsToNextTurn, nextPick, takenByAutodraft }),
     };
   }).sort((a, b) => b.score - a.score);
@@ -206,6 +251,7 @@ export function recommend(input) {
     roster, counts, needs, scoring: input.scoringSummary || null,
     expertsAvailable: expertRanks.length,
     autodraft,
+    survival,
     consensusSource: expertRanks.length ? 'imported expert rankings blended with ESPN rank/ADP' : 'house model: ESPN rank + ADP',
     availableCount: available.length,
     recommendations: rows.slice(0, 5),
