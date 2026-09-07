@@ -120,16 +120,57 @@ function brier(pairs) {
   return pairs.reduce((sum, [p, o]) => sum + ((p - o) * (p - o)), 0) / pairs.length;
 }
 
+function skillOf(model, market) {
+  if (model == null || !market) return null;
+  return 1 - (model / market);
+}
+
+/** Ten equal buckets of predicted probability. */
+const RELIABILITY_BUCKETS = 10;
+
 /**
- * Score the model against the ADP-only baseline.
+ * Predicted probability against observed frequency, in deciles.
  *
- * `skill` is 1 - brier/baseline: positive means the need conditioning earned its place,
- * negative means it did not. Reporting it is the point. An empty log returns n: 0 and NO
- * score, because a Brier of 0.0 reads as a perfect forecaster.
+ * A Brier score alone cannot tell a well-calibrated model from a timid one -- never
+ * leaving 0.5 scores respectably and says nothing. The reliability table is what answers
+ * "when it says about 7 in 10, does that happen 70% of the time", and `resolution` (the
+ * spread of observed rates across buckets) is what answers "does it discriminate at all".
  */
-export function brierReport(log, { minCoverage = 1 } = {}) {
-  const forecasts = (log && log.forecasts ? log.forecasts : [])
-    .filter((f) => f.settled && (f.coverage == null || f.coverage >= minCoverage));
+function reliabilityTable(pairs) {
+  const buckets = Array.from({ length: RELIABILITY_BUCKETS }, (_, i) => ({
+    bucket: i,
+    from: i / RELIABILITY_BUCKETS,
+    to: (i + 1) / RELIABILITY_BUCKETS,
+    n: 0,
+    predictedSum: 0,
+    observedSum: 0,
+  }));
+  for (const [p, o] of pairs) {
+    const i = Math.min(Math.floor(p * RELIABILITY_BUCKETS), RELIABILITY_BUCKETS - 1);
+    buckets[i].n += 1;
+    buckets[i].predictedSum += p;
+    buckets[i].observedSum += o;
+  }
+  return buckets
+    .filter((b) => b.n > 0)
+    .map((b) => ({
+      bucket: b.bucket,
+      from: b.from,
+      to: b.to,
+      n: b.n,
+      predicted: b.predictedSum / b.n,
+      observed: b.observedSum / b.n,
+    }));
+}
+
+function resolutionOf(table, baseRate) {
+  if (baseRate == null || !table.length) return null;
+  const total = table.reduce((a, b) => a + b.n, 0);
+  if (!total) return null;
+  return table.reduce((a, b) => a + (b.n / total) * ((b.observed - baseRate) ** 2), 0);
+}
+
+function pairsOf(forecasts) {
   const model = [];
   const market = [];
   for (const f of forecasts) {
@@ -141,17 +182,61 @@ export function brierReport(log, { minCoverage = 1 } = {}) {
       if (e.pMarket != null) market.push([e.pMarket, o]);
     }
   }
+  return { model, market };
+}
+
+/**
+ * Score the model against the ADP-only baseline.
+ *
+ * `skill` is 1 - brier/baseline: positive means the need conditioning earned its place,
+ * negative means it did not. Reporting it is the point. An empty log returns n: 0 and NO
+ * score, because a Brier of 0.0 reads as a perfect forecaster.
+ *
+ * `byRound` exists because the claim under test is specifically about the MIDDLE rounds.
+ * Conditioning is near-inert early -- with every starting slot open the multipliers barely
+ * separate -- so an aggregate dilutes exactly the signal being claimed. It needs the league
+ * size to turn a pick number into a round; without `teams` the field is null rather than
+ * guessed at.
+ */
+export function brierReport(log, { minCoverage = 1, teams = null } = {}) {
+  const all = (log && log.forecasts ? log.forecasts : []);
+  const forecasts = all.filter((f) => f.settled && (f.coverage == null || f.coverage >= minCoverage));
+  const { model, market } = pairsOf(forecasts);
+
   const modelBrier = brier(model);
   const marketBrier = brier(market);
   const rate = model.length ? model.reduce((a, [, o]) => a + o, 0) / model.length : null;
+  const reliability = reliabilityTable(model);
+
+  const size = Number(teams);
+  let byRound = null;
+  if (Number.isInteger(size) && size >= 2) {
+    const rounds = new Map();
+    for (const f of forecasts) {
+      const round = Math.ceil(Number(f.targetPick) / size);
+      if (!Number.isInteger(round) || round < 1) continue;
+      if (!rounds.has(round)) rounds.set(round, []);
+      rounds.get(round).push(f);
+    }
+    byRound = Array.from(rounds.keys()).sort((a, b) => a - b).map((round) => {
+      const slice = pairsOf(rounds.get(round));
+      const m = brier(slice.model);
+      const b = brier(slice.market);
+      return { round, n: slice.model.length, brier: m, baselineBrier: b, skill: skillOf(m, b) };
+    });
+  }
+
   return {
     n: model.length,
     scoredPicks: forecasts.length,
     brier: modelBrier,
     baselineBrier: marketBrier,
     climatologyBrier: rate == null ? null : brier(model.map(([, o]) => [rate, o])),
-    skill: (modelBrier == null || !marketBrier) ? null : 1 - (modelBrier / marketBrier),
-    excluded: (log && log.forecasts ? log.forecasts : [])
-      .filter((f) => f.settled && f.coverage != null && f.coverage < minCoverage).length,
+    skill: skillOf(modelBrier, marketBrier),
+    baseRate: rate,
+    reliability,
+    resolution: resolutionOf(reliability, rate),
+    byRound,
+    excluded: all.filter((f) => f.settled && f.coverage != null && f.coverage < minCoverage).length,
   };
 }

@@ -5,6 +5,7 @@ import {
   settleForecasts, brierReport, FORECAST_WIDTH,
 } from '../src/calibration.js';
 
+const close = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) < tol, a + ' !== ' + b);
 const entries = (pairs) => pairs.map(([playerId, p, pMarket]) => ({ playerId, p, pMarket }));
 const forecast = (over) => openForecast(Object.assign({
   atPick: 10, targetPick: 15, basis: 'need-conditioned', madeAt: 1000,
@@ -101,4 +102,70 @@ test('settled forecasts are dropped before unsettled ones when the log fills', (
   }
   assert.ok(log.forecasts.length <= 40);
   assert.ok(log.forecasts.some((f) => !f.settled) || log.forecasts.every((f) => f.settled));
+});
+
+const settledLog = (rows) => {
+  // rows: [{ targetPick, entries: [[playerId, p, pMarket, survived]] }]
+  return {
+    version: 1,
+    forecasts: rows.map((r) => ({
+      atPick: r.targetPick - 3,
+      targetPick: r.targetPick,
+      basis: 'need-conditioned',
+      entries: r.entries.map(([playerId, p, pMarket]) => ({ playerId, p, pMarket })),
+      settled: true,
+      coverage: 1,
+      outcomes: r.entries.map(([playerId, , , survived]) => ({ playerId, survived })),
+    })),
+  };
+};
+
+test('the report slices by round, because the claim is about the middle rounds', () => {
+  // Conditioning is near-inert early by construction, so an aggregate dilutes exactly
+  // the signal under test.
+  const log = settledLog([
+    { targetPick: 5, entries: [['a', 0.5, 0.5, 1], ['b', 0.5, 0.5, 0]] },   // round 1
+    { targetPick: 60, entries: [['c', 0.9, 0.5, 1], ['d', 0.1, 0.5, 0]] },  // round 5
+  ]);
+  const report = brierReport(log, { teams: 12 });
+  assert.deepEqual(report.byRound.map((r) => r.round), [1, 5]);
+  assert.equal(report.byRound[0].skill, 0, 'round 1: model and baseline identical');
+  assert.ok(report.byRound[1].skill > 0.8, 'round 5: the model was confident and right');
+  assert.equal(report.byRound[0].n, 2);
+});
+
+test('rounds are not guessed at without the league size', () => {
+  const log = settledLog([{ targetPick: 60, entries: [['a', 0.9, 0.5, 1]] }]);
+  assert.equal(brierReport(log).byRound, null);
+  assert.equal(brierReport(log, { teams: 0 }).byRound, null);
+});
+
+test('the reliability table separates a calibrated model from a confident one', () => {
+  // Ten predictions at 0.9, nine of which survive: well calibrated.
+  const entries = Array.from({ length: 10 }, (_, i) => ['p' + i, 0.9, 0.5, i < 9 ? 1 : 0]);
+  const report = brierReport(settledLog([{ targetPick: 20, entries }]));
+  const bucket = report.reliability.find((b) => b.from <= 0.9 && b.to > 0.9);
+  assert.equal(bucket.n, 10);
+  close(bucket.predicted, 0.9);
+  close(bucket.observed, 0.9, 1e-12);
+  close(report.baseRate, 0.9, 1e-12);
+});
+
+test('resolution is zero for a model that says the same thing about everyone', () => {
+  // A timid forecaster scores a respectable Brier and discriminates nothing. That has to
+  // be visible, or "0.19" reads as competence.
+  const flat = Array.from({ length: 8 }, (_, i) => ['p' + i, 0.5, 0.5, i % 2]);
+  const flatReport = brierReport(settledLog([{ targetPick: 20, entries: flat }]));
+  close(flatReport.resolution, 0, 1e-12);
+
+  const sharp = [['a', 0.95, 0.5, 1], ['b', 0.95, 0.5, 1], ['c', 0.05, 0.5, 0], ['d', 0.05, 0.5, 0]];
+  const sharpReport = brierReport(settledLog([{ targetPick: 20, entries: sharp }]));
+  assert.ok(sharpReport.resolution > 0.2, 'a discriminating model must score above a flat one');
+});
+
+test('an empty log has no reliability table and no resolution to report', () => {
+  const report = brierReport(createLog());
+  assert.deepEqual(report.reliability, []);
+  assert.equal(report.resolution, null);
+  assert.equal(report.baseRate, null);
 });

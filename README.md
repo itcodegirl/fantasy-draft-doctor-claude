@@ -229,7 +229,37 @@ refuses to report a number at all.
 
 Forecasts are recorded once per target pick — a re-render cannot upgrade a prediction with
 information it did not have when you would have acted on it — and the log is per-league,
-stored under its own key so a local undo cannot erase the measurement record.
+stored under its own key so a local undo cannot erase the measurement record. **Export
+carries the log**, so a mock draft's evidence can be analysed off the draft laptop rather
+than being stranded in one browser profile.
+
+The report is sliceable, because a single aggregate cannot test the claim being made:
+
+- **`byRound`** — conditioning is near-inert in rounds 1–4 by construction, since with
+  every starting slot open the multipliers barely separate. A model that is flat early and
+  positive in the middle rounds is the *claimed* shape and shows up as a mediocre total.
+- **`reliability`** — deciles of predicted probability against observed frequency. A Brier
+  score alone cannot tell a calibrated model from a timid one; never leaving 0.5 scores
+  respectably and says nothing.
+- **`resolution`** — how far the buckets spread from the base rate, i.e. whether the model
+  discriminates at all.
+
+#### Running the mock
+
+One thing will silently ruin the run: **`recommend()` returns early when the scoring gate
+is unpassed**, before any forecast is opened. Record the gate on the mock league first, or
+you will draft sixteen rounds and end with an empty log. The panel now says so in place
+while the gate is open.
+
+Also set your team id and draft slot, and keep the panel open at every one of your turns —
+a forecast is opened on render, once per target pick, first write wins. A turn you did not
+render is a turn not scored.
+
+Two things falsify the models faster than the score does. If the panel names an
+autodrafting team and its next pick is *not* the player shown, the eligibility model is
+wrong for that league. If the survival line reads *"ADP only — opponent rosters not
+usable"* for most of the draft, attribution failed and the need model never ran — that is a
+data problem, not a result.
 
 ### Tier exhaustion and VONA
 
@@ -363,7 +393,7 @@ and `sidePanel` only.
 node --test tests/*.test.mjs
 ```
 
-166 tests. (Passing the directory rather than the glob fails on some Node builds.)
+176 tests. (Passing the directory rather than the glob fails on some Node builds.)
 
 CI runs the same suite on every push to `main` and every pull request, on Node 20 and
 22 (`.github/workflows/tests.yml`). There is nothing to install first — the folder is

@@ -585,3 +585,28 @@ test('a league with no stored calibration log starts empty rather than undefined
   await s.init();
   assert.deepEqual(s.calibration.forecasts, []);
 });
+
+test('importing a board brings its measurement record with it', async () => {
+  const storage = fakeStorage({ [KEY_ACTIVE]: 100, [keyConfig(100)]: { leagueId: 100 } }, 0);
+  const s = createSession({ storage, now });
+  await s.init();
+  s.setCalibration({ version: 1, forecasts: [{ targetPick: 5, entries: [], settled: false }] });
+
+  await s.importPayload({
+    leagueId: 400, config: { leagueId: 400 }, state: null, pool: {},
+    calibration: { version: 1, forecasts: [{ targetPick: 77, entries: [], settled: true }] },
+  });
+  assert.equal(s.calibration.forecasts[0].targetPick, 77);
+  assert.equal(storage.data[keyCalibration(400)].forecasts[0].targetPick, 77);
+});
+
+test('importing a file from before the log existed clears it rather than inheriting', async () => {
+  const storage = fakeStorage({ [KEY_ACTIVE]: 100, [keyConfig(100)]: { leagueId: 100 } }, 0);
+  const s = createSession({ storage, now });
+  await s.init();
+  s.setCalibration({ version: 1, forecasts: [{ targetPick: 5, entries: [], settled: false }] });
+
+  await s.importPayload({ leagueId: 500, config: { leagueId: 500 }, state: null, pool: {} });
+  assert.deepEqual(s.calibration.forecasts, [],
+    'the previous league measurements must not attach to the imported board');
+});

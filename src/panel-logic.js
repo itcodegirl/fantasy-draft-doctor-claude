@@ -52,14 +52,16 @@ export function gatePatch(gate, passed, notes, at) {
   return patch;
 }
 
-export const EXPORT_FORMAT_VERSION = 1;
+// 2 added the calibration log. Nothing reads the version, so v1 files still import --
+// the bump is a record that the shape changed.
+export const EXPORT_FORMAT_VERSION = 2;
 
 /**
  * Build the transfer payload. The pool must be included in full: exporting only a
  * count produced an empty board on the destination machine, which is the one job
  * export has.
  */
-export function buildExport(leagueId, config, state, pool, isoNow) {
+export function buildExport(leagueId, config, state, pool, isoNow, calibration) {
   return {
     formatVersion: EXPORT_FORMAT_VERSION,
     leagueId: leagueId,
@@ -67,6 +69,10 @@ export function buildExport(leagueId, config, state, pool, isoNow) {
     config: config,
     state: state,
     pool: pool || {},
+    // The measurement record travels with the board. Without this a mock draft's evidence
+    // is stranded in one browser profile's extension storage, which makes the harness
+    // unfalsifiable in practice however carefully it scores.
+    calibration: calibration && Array.isArray(calibration.forecasts) ? calibration : null,
   };
 }
 
@@ -88,12 +94,20 @@ export function parseImport(raw) {
 
   const pool = parsed.pool && typeof parsed.pool === 'object' ? parsed.pool : {};
 
+  const calibration = parsed.calibration && Array.isArray(parsed.calibration.forecasts)
+    ? parsed.calibration
+    : null;
+
   return {
     leagueId: leagueId,
     config: config,
     state: parsed.state || null,
     pool: pool,
     poolCount: Object.keys(pool).length,
+    // Null for a v1 file, which the caller turns into an empty log rather than leaving
+    // undefined to propagate into the report.
+    calibration: calibration,
+    calibrationCount: calibration ? calibration.forecasts.length : 0,
   };
 }
 

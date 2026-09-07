@@ -270,6 +270,16 @@ function renderRecommendations() {
     empty.className = 'empty';
     empty.textContent = 'Recommendations will appear here when setup and scoring validation are complete.';
     list.appendChild(empty);
+    // Say it out loud. `recommend()` returns before any forecast is opened, so a mock run
+    // to collect calibration evidence quietly gathers nothing while this gate is unpassed
+    // -- and you only find out at the end, when the log is empty and unexplained.
+    if (!c.scoringValidated) {
+      const warn = document.createElement('div');
+      warn.className = 'empty';
+      warn.textContent = 'No survival forecasts are being recorded while the scoring gate '
+        + 'is unpassed. If you are running a mock to score the model, record the gate first.';
+      list.appendChild(warn);
+    }
     $('recommendPick').textContent = '';
     $('autodraftNote').hidden = true;
     $('survivalNote').hidden = true;
@@ -389,7 +399,10 @@ function updateCalibration(result) {
     save();
   }
 
-  const report = brierReport(session.calibration);
+  const settings = config().espnSettings;
+  // The league size turns a pick number into a round, which is what makes "beats ADP in
+  // the middle rounds" checkable rather than asserted.
+  const report = brierReport(session.calibration, { teams: settings && settings.size });
   if (!report.n || report.scoredPicks < 3) {
     el.hidden = report.scoredPicks === 0;
     el.textContent = report.scoredPicks
@@ -408,6 +421,16 @@ function updateCalibration(result) {
   } else {
     parts.push('ADP-only baseline ' + report.baselineBrier.toFixed(3)
       + ' \u2014 the need model is doing worse; treat the odds as ADP');
+  }
+  // Where the rounds are separable, say which ones the model actually earned its keep in.
+  // A model inert early and positive in the middle is the claimed shape, and shows up as a
+  // mediocre aggregate.
+  const middle = (report.byRound || []).filter((r) => r.skill != null && r.n >= 10);
+  if (middle.length >= 2) {
+    const best = middle.reduce((a, b) => (b.skill > a.skill ? b : a));
+    if (best.skill > 0) {
+      parts.push('strongest in round ' + best.round + ' (' + Math.round(best.skill * 100) + '% better there)');
+    }
   }
   el.textContent = parts.join(' \u00b7 ') + '.';
 }
@@ -717,7 +740,7 @@ function wire() {
 
   $('exportBtn').addEventListener('click', () => {
     const payload = buildExport(session.activeLeagueId, config(), state(), pool(),
-      new Date().toISOString());
+      new Date().toISOString(), session.calibration);
     const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);

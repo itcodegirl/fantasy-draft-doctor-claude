@@ -287,3 +287,27 @@ test('scarcity says nothing when there is nothing to say', () => {
   assert.equal(scarcitySummary(null, 40), null);
   assert.equal(scarcitySummary({ vona: [], tiers: [] }, 40), null);
 });
+
+test('the measurement record survives an export/import round trip', () => {
+  // Without this the evidence is stranded in one browser profile and the harness is
+  // unfalsifiable in practice, however carefully it scores.
+  const log = { version: 1, forecasts: [{ targetPick: 13, entries: [{ playerId: '1', p: 0.4, pMarket: 0.6 }], settled: true, coverage: 1, outcomes: [{ playerId: '1', survived: 1 }] }] };
+  const payload = buildExport(42, { leagueId: 42 }, { leagueId: 42 }, { 1: { id: 1 } }, 'now', log);
+  const parsed = parseImport(JSON.parse(JSON.stringify(payload)));
+  assert.equal(parsed.calibrationCount, 1);
+  assert.deepEqual(parsed.calibration.forecasts[0].outcomes, [{ playerId: '1', survived: 1 }]);
+  assert.equal(parsed.poolCount, 1, 'the pool still travels too');
+});
+
+test('a file from before the log existed imports as nothing, not undefined', () => {
+  const v1 = { formatVersion: 1, leagueId: 42, config: { leagueId: 42 }, state: null, pool: {} };
+  const parsed = parseImport(v1);
+  assert.equal(parsed.calibration, null);
+  assert.equal(parsed.calibrationCount, 0);
+});
+
+test('a malformed calibration block is refused rather than half-imported', () => {
+  const payload = buildExport(42, { leagueId: 42 }, null, {}, 'now', { forecasts: 'not an array' });
+  assert.equal(payload.calibration, null);
+  assert.equal(parseImport({ leagueId: 42, calibration: { nope: true } }).calibration, null);
+});

@@ -387,6 +387,11 @@ export function createSession(opts) {
       // import had none left them in memory and then saved them under the imported
       // league's key.
       pool = parsed.pool || {};
+      // A v1 export carries no log. Install an empty one rather than leaving the
+      // previous league's measurements attached to the imported board.
+      calibration = parsed.calibration && Array.isArray(parsed.calibration.forecasts)
+        ? parsed.calibration
+        : createLog();
       // --- end atomic install ---
 
       offerContext = null;
