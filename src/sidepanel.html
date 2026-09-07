@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Draft Copilot</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header>
+    <div class="titlebar">
+      <strong>Draft Copilot</strong>
+      <span id="phaseBadge" class="badge badge-warn">tracking only</span>
+      <span id="leagueLabel" class="subtle">no league yet</span>
+    </div>
+    <div id="statusRow" class="status">
+      <span id="syncDot" class="dot dot-off"></span>
+      <span id="syncText">offline &mdash; manual entry</span>
+      <span class="sep">&middot;</span>
+      <span id="confirmedAt">never confirmed</span>
+    </div>
+    <div id="latencyRow" class="status subtle" hidden></div>
+  </header>
+
+  <section id="conflicts" class="panel panel-alert" hidden>
+    <h2>Needs your decision</h2>
+    <div id="conflictList"></div>
+  </section>
+
+  <section id="pending" class="panel panel-pending" hidden>
+    <h2>Pending confirmation</h2>
+    <p class="hint">Seen on the live feed but not yet confirmed by ESPN. These players are
+      temporarily removed from the available list until confirmed or rejected.</p>
+    <div id="pendingList"></div>
+  </section>
+
+  <section id="recommendations" class="panel panel-recommend" hidden>
+    <h2>Next pick <span id="recommendPick" class="subtle"></span></h2>
+    <div id="recommendationList" class="list compact"></div>
+    <p id="recommendationNote" class="hint"></p>
+  </section>
+
+  <section class="panel">
+    <div class="row">
+      <input id="search" type="search" placeholder="Search players&hellip;" autocomplete="off">
+      <select id="posFilter">
+        <option value="">All</option>
+        <option value="QB">QB</option>
+        <option value="RB">RB</option>
+        <option value="WR">WR</option>
+        <option value="TE">TE</option>
+        <option value="DST">D/ST</option>
+        <option value="K">K</option>
+      </select>
+    </div>
+    <div class="row">
+      <label class="check"><input type="checkbox" id="hideDrafted" checked> Hide drafted</label>
+      <label class="check" title="Refuses live snapshots and observations outright"><input type="checkbox" id="syncPaused"> Manual mode</label>
+      <span id="poolCount" class="subtle"></span>
+    </div>
+    <div id="playerList" class="list"></div>
+  </section>
+
+  <section class="panel">
+    <h2>My roster <span id="rosterCount" class="subtle"></span></h2>
+    <div id="rosterList" class="list compact"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Pick log <span id="pickCount" class="subtle"></span></h2>
+    <div class="row">
+      <button id="undoBtn" class="btn">Undo last pick</button>
+    </div>
+    <div id="pickLog" class="list compact"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Setup</h2>
+    <div class="row">
+      <label for="myTeam">My team id</label>
+      <input id="myTeam" type="number" min="1" max="20" placeholder="e.g. 4">
+    </div>
+    <div class="row">
+      <label for="mySlot">My draft slot</label>
+      <input id="mySlot" type="number" min="1" max="20" placeholder="revealed 3:00pm">
+    </div>
+    <div class="row">
+      <button id="exportBtn" class="btn">Export settings</button>
+      <button id="importBtn" class="btn">Import settings</button>
+      <input id="importFile" type="file" accept="application/json" hidden>
+    </div>
+    <div class="row">
+      <button id="expertsBtn" class="btn">Import expert CSV</button>
+      <input id="expertsFile" type="file" accept=".csv,text/csv" hidden>
+      <span id="expertsStatus" class="subtle"></span>
+    </div>
+    <p class="hint">CSV columns: <code>playerId</code> or <code>name</code>, <code>rank</code>,
+      and optional <code>byeWeek</code>. Rankings are matched to the cached ESPN pool.</p>
+    <p class="hint">A pinned extension key keeps the extension's identity stable across
+      machines, but it does not move saved data. Use export/import to carry setup to the
+      draft laptop.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Validation status</h2>
+    <div id="validation" class="list compact"></div>
+    <p class="hint">Values, tiers and recommendations stay hidden until scoring validation
+      passes. Tracking without valuation is useful; valuation on unvalidated scoring is
+      worse than nothing, because it looks authoritative.</p>
+  </section>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

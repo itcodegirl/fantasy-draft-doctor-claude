@@ -1,0 +1,12 @@
+# Exported settings can contain league and roster configuration — keep them local.
+draft-copilot-settings.json
+dc-*.json
+
+# Captures from Phase 1 validation may contain league/team identifiers.
+captures/
+*.har
+
+node_modules/
+*.log
+.DS_Store
+Thumbs.db

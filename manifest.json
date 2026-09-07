@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Draft Copilot",
+  "version": "0.1.0",
+  "description": "Read-only draft assistant for your own ESPN fantasy football draft. Shows scoring-aware value, tiers, and three recommendations. Never submits a pick.",
+  "permissions": ["storage", "sidePanel"],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "side_panel": {
+    "default_path": "src/sidepanel.html"
+  },
+  "action": {
+    "default_title": "Open Draft Copilot"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://fantasy.espn.com/football/*",
+        "https://www.espn.com/football/waitingroom*"
+      ],
+      "js": ["src/hook.js"],
+      "world": "MAIN",
+      "run_at": "document_start",
+      "all_frames": false
+    },
+    {
+      "matches": [
+        "https://fantasy.espn.com/football/*",
+        "https://www.espn.com/football/waitingroom*"
+      ],
+      "js": ["src/content.js"],
+      "world": "ISOLATED",
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ]
+}
