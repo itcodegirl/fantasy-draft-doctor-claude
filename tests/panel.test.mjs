@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildExport, parseImport, freshness, routeLeague, gatePatch, GATES,
-  keyState, keyPool, keyConfig, keySnapshot, DEFAULT_CONFIG, autodraftSummary, survivalPhrase, survivalSummary } from '../src/panel-logic.js';
+  keyState, keyPool, keyConfig, keySnapshot, DEFAULT_CONFIG, autodraftSummary, survivalPhrase, survivalSummary, scarcitySummary } from '../src/panel-logic.js';
 import { createState, applySnapshot, manualPick, confirmedCount } from '../src/store.js';
 
 // ------------------------------------------------------------------- export
@@ -254,4 +254,36 @@ test('the survival summary reports what was modelled and what was not', () => {
 test('the survival summary is hidden when there is nothing to model', () => {
   assert.equal(survivalSummary(null), null);
   assert.equal(survivalSummary({ basis: 'none', modelledPicks: 0 }), null);
+});
+
+test('the scarcity lines name the cost of waiting and the tier at risk', () => {
+  const summary = scarcitySummary({
+    vona: [{ pos: 'RB', bestNow: 'Ace RB', vona: 36.8 }, { pos: 'WR', bestNow: 'Bolt WR', vona: 4.1 }],
+    tiers: [{ pos: 'RB', tier: 3, remaining: 4, exhaustion: 0.78 }],
+  }, 198);
+  assert.match(summary.lines[0], /waiting costs most at RB: about 37 projected points/);
+  assert.match(summary.lines[0], /Ace RB/);
+  assert.match(summary.lines[1], /about 78 in 100 that all 4 remaining RB tier-3 players are gone before #198/);
+});
+
+test('a one-player tier is not the sentence worth printing', () => {
+  // "The last man in this tier will be gone" is implied by his own survival number and
+  // crowds out the tiers you can still act on.
+  const summary = scarcitySummary({
+    vona: [],
+    tiers: [{ pos: 'WR', tier: 2, remaining: 1, exhaustion: 0.99 },
+      { pos: 'RB', tier: 4, remaining: 3, exhaustion: 0.42 }],
+  }, 40);
+  assert.equal(summary.lines.length, 1);
+  assert.match(summary.lines[0], /all 3 remaining RB tier-4 players/);
+});
+
+test('a position that costs nothing to wait on is not reported as a cost', () => {
+  const summary = scarcitySummary({ vona: [{ pos: 'K', bestNow: 'Kicker', vona: 0 }], tiers: [] }, 40);
+  assert.equal(summary, null);
+});
+
+test('scarcity says nothing when there is nothing to say', () => {
+  assert.equal(scarcitySummary(null, 40), null);
+  assert.equal(scarcitySummary({ vona: [], tiers: [] }, 40), null);
 });

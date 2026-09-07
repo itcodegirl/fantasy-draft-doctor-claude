@@ -175,7 +175,8 @@ export function survivalProbabilities(input) {
   const to = Number(nextPick);
   const windowLength = Math.max(to - from - 1, 0);
   const empty = {
-    basis: 'none', byPlayerId: {}, windowPicks: [], candidates: 0,
+    basis: 'none', byPlayerId: {}, candidateIds: [],
+    windowPicks: [], candidates: 0,
     pinnedPicks: 0, modelledPicks: 0, conditionedPicks: 0, unconditionedPicks: 0,
     conditioningStrength: 0, takenMass: 0, noAdpPlayerIds: [], attributionRate: null, assumptions,
   };
@@ -319,6 +320,9 @@ export function survivalProbabilities(input) {
   return {
     basis: conditionedPicks ? 'need-conditioned' : 'market-only',
     byPlayerId,
+    // Downstream joint models (tier exhaustion, VONA) work from `byPlayerId` plus
+    // `takenMass`, so the per-pick propensities are not carried out of here.
+    candidateIds: candidates.map((c) => c.id),
     windowPicks,
     candidates: candidates.length,
     pinnedPicks,

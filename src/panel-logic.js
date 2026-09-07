@@ -213,6 +213,34 @@ export function survivalSummary(survival) {
   return { text: bits.join(' \u00b7 ') + '.', uncalibrated: true };
 }
 
+/**
+ * The two scarcity lines: which position waiting costs the most at, and which tier is
+ * closest to emptying before your turn.
+ *
+ * A one-player tier is skipped. "The last man in this tier will be gone" is trivially
+ * implied by his own survival number and crowds out the tiers you can still act on --
+ * the useful sentence is about a group you might still get one of.
+ */
+export function scarcitySummary(scarcity, nextPick) {
+  if (!scarcity || (!scarcity.vona.length && !scarcity.tiers.length)) return null;
+  const lines = [];
+
+  const top = scarcity.vona.filter((v) => v.vona > 0)[0];
+  if (top) {
+    lines.push('waiting costs most at ' + top.pos + ': about '
+      + Math.round(top.vona) + ' projected points between ' + top.bestNow
+      + ' and whoever is left at #' + nextPick + '.');
+  }
+
+  const tier = scarcity.tiers.filter((t) => t.remaining >= 2)[0];
+  if (tier) {
+    lines.push('about ' + Math.round(tier.exhaustion * 100) + ' in 100 that all '
+      + tier.remaining + ' remaining ' + tier.pos + ' tier-' + tier.tier
+      + ' players are gone before #' + nextPick + '.');
+  }
+  return lines.length ? { lines } : null;
+}
+
 /** Storage keys, namespaced per league so nothing is shared across drafts. */
 export const KEY_ACTIVE = 'dc.activeLeague';
 export const keyState = (id) => 'dc.state.' + id;

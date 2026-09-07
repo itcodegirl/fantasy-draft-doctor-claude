@@ -9,6 +9,7 @@
 
 import { analyzeAutodraft, POSITIONS, FLEX_POSITIONS } from './autodraft.js';
 import { survivalProbabilities } from './survival.js';
+import { analyzeScarcity } from './scarcity.js';
 
 const SLOT_TO_POS = {
   0: 'QB', 2: 'RB', 4: 'WR', 6: 'TE', 16: 'DST', 17: 'K', 23: 'FLEX',
@@ -120,7 +121,7 @@ export function recommend(input) {
     players, picks = [], slots, teams, mySlot, myTeamId, scoringValidated,
     unavailablePlayerIds = [], currentPick: observedCurrentPick = 0,
     autodraftDetection = true, survivalModel = true, survivalConditioning = true,
-    includeMarketBaseline = false,
+    includeMarketBaseline = false, scarcityModel = true,
   } = input;
   if (!scoringValidated) return { error: 'Pass the scoring validation gate before using recommendations.' };
   if (!players || !Object.keys(players).length) return { error: 'Player pool not loaded yet.' };
@@ -189,6 +190,11 @@ export function recommend(input) {
   } else if (survival) {
     survival.marketByPlayerId = null;
   }
+  // Tier exhaustion and VONA are joint questions over the same survival vector: which
+  // position drops off most before your turn, and which tiers empty out entirely.
+  const scarcity = (scarcityModel && survival)
+    ? analyzeScarcity({ players, survival, unavailablePlayerIds })
+    : null;
   const baseline = rosterLineupPoints(roster, slots);
   const maxProj = Math.max(...available.map((p) => p.proj), 1);
   const expertRanks = available.map((p) => expertRankFor(input.experts, p)).filter((n) => n != null);
@@ -252,6 +258,7 @@ export function recommend(input) {
     expertsAvailable: expertRanks.length,
     autodraft,
     survival,
+    scarcity,
     consensusSource: expertRanks.length ? 'imported expert rankings blended with ESPN rank/ADP' : 'house model: ESPN rank + ADP',
     availableCount: available.length,
     recommendations: rows.slice(0, 5),

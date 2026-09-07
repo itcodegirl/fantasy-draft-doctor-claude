@@ -12,6 +12,7 @@ import {
 } from './store.js';
 import {
   buildExport, parseImport, freshness, autodraftSummary, survivalPhrase, survivalSummary,
+  scarcitySummary,
 } from './panel-logic.js';
 import {
   selectForecastPlayers, openForecast, recordForecast, settleForecasts, brierReport,
@@ -272,12 +273,14 @@ function renderRecommendations() {
     $('recommendPick').textContent = '';
     $('autodraftNote').hidden = true;
     $('survivalNote').hidden = true;
+    $('scarcityNote').hidden = true;
     $('calibrationNote').hidden = true;
     return;
   }
   box.hidden = false;
   renderAutodraftNote(result.autodraft);
   renderSurvivalNote(result.survival);
+  renderScarcityNote(result.scarcity, result.nextPick);
   updateCalibration(result);
   $('recommendPick').textContent = '#' + result.nextPick + ' · round ' + result.round;
   const consensusText = result.expertsAvailable
@@ -338,6 +341,14 @@ function renderSurvivalNote(survival) {
   el.hidden = false;
   el.textContent = summary.text + ' These are model estimates and have not been'
     + ' checked against a real draft yet.';
+}
+
+function renderScarcityNote(scarcity, nextPick) {
+  const el = $('scarcityNote');
+  const summary = scarcitySummary(scarcity, nextPick);
+  if (!summary) { el.hidden = true; el.textContent = ''; return; }
+  el.hidden = false;
+  el.textContent = summary.lines.join(' ');
 }
 
 /**

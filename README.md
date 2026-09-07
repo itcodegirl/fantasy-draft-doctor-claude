@@ -208,7 +208,7 @@ not invalidate the whole window.
 
 Measured effect, on a synthetic 12-team board: **8–9 points of survival** when half the
 window is saturated at a position, **~22 points** when all of it is. Real, and not a
-transformation. Cost is **+1.8 ms** on a `recommend()` that took 5.7 ms.
+transformation. Cost is **+0.7 ms** on a `recommend()` that took 5.7 ms.
 
 ### Is it actually better than ADP?
 
@@ -230,6 +230,59 @@ refuses to report a number at all.
 Forecasts are recorded once per target pick — a re-render cannot upgrade a prediction with
 information it did not have when you would have acted on it — and the log is per-league,
 stored under its own key so a local undo cannot erase the measurement record.
+
+### Tier exhaustion and VONA
+
+Two questions the board can now answer that "who is the best player left" cannot:
+
+> waiting costs most at RB: about 37 projected points between Ace RB and whoever is left
+> at #198. About 78 in 100 that all 4 remaining RB tier-3 players are gone before #198.
+
+**VONA** (Value Over Next Available) is the drop-off between the best player at a position
+now and the best one expected to survive to your turn. That is the question a draft
+actually asks — not who is best, but at which position you lose the most by waiting. Note
+the replacement level cancels: VONA is a difference of values at the same position, so
+shifting both by a baseline leaves it unchanged, which is why this needs no
+replacement-level machinery.
+
+**Tier exhaustion** is the chance an entire tier empties before you pick. Tiers are
+gap-based and deterministic (an EM or GMM fit gives different tiers run to run, and a
+board whose tiers move while you read it is worse than no tiers), and they are computed
+over the full position list so a tier keeps its identity as the board empties.
+
+#### The joint problem, and one wrong turn worth documenting
+
+Both are **joint** questions about a set of players, and both are usually answered by
+multiplying individual survival probabilities. Survivals in a draft are negatively
+correlated — the players compete for the same finite set of picks, so if one lasts the
+others are likelier to last too.
+
+The survival model says player *j* is taken with probability `p_j = 1 − S_j`, and by its
+sum-to-K identity those add to exactly the window length. The joint consistent with that
+is **conditional Bernoulli**: independent indicators conditioned on the total coming out at
+K. Conditioning is what carries the correlation — one player going uses up one of the K
+picks, making everyone else likelier to last.
+
+```
+P(all of S gone | total = K) = ∏ p_j · P(N_rest = K − |S|) / P(N_all = K)
+```
+
+Both terms are Poisson-binomial dynamic programs: exact, deterministic, no sampling.
+
+The wrong turn, recorded because it looks equally principled: decomposing over **picks**
+instead — "the chance pick *n* lands in this set is the sum of its propensities, so the
+count is a Poisson-binomial over picks." For a single player that gives
+`1 − ∏(1 − qₙ)` where the model says the answer is `Σqₙ`, so it does not reproduce the
+marginals it was built from, and it understates badly. Measured against the correct form
+it was wrong by up to 35 points.
+
+Having fixed it, the honest result is that **the correlation correction is about one
+point**, not thirty-five. The independence product was a decent approximation; this is the
+exact one and costs little.
+
+Cost is **+2.7 ms**. Written naively — a fresh array per player inside the DP — it was
+56 ms per render; reusing two buffers and skipping the complement in place brought it to
+2.9 ms.
 
 ---
 
@@ -310,7 +363,7 @@ and `sidePanel` only.
 node --test tests/*.test.mjs
 ```
 
-150 tests. (Passing the directory rather than the glob fails on some Node builds.)
+166 tests. (Passing the directory rather than the glob fails on some Node builds.)
 
 CI runs the same suite on every push to `main` and every pull request, on Node 20 and
 22 (`.github/workflows/tests.yml`). There is nothing to install first — the folder is
@@ -349,6 +402,13 @@ empty log reporting no score rather than a perfect one. `starterDemand` is check
 `eligiblePositions` over an exhaustive grid — two need models drifting apart is the exact
 disease `phase3-wip` carries.
 
+**`scarcity.js` (12)** — the count distribution against a hand-computed Poisson-binomial;
+conditioning reproducing `P(taken | exactly one taken) = 0.28/0.47` rather than the
+unconditional `0.5`; a set larger than the window never exhausting; exhaustion falling as
+the set grows; no tier ever reported as certainly gone; the layer-cake expectation matched
+by hand; VONA never negative; tier cuts landing on a real cliff and staying deterministic;
+and players the survival model could not price left out rather than guessed.
+
 **`autodraft.js` (17)** — slot inversion against the snake, slot maps built from a later
 round when the first is unattributed, the positional filter that overall-rank matching
 gets wrong, trailing streaks broken by a manager taking over, keepers and unattributed
@@ -379,6 +439,9 @@ which is how six defects shipped while `store.js` had twenty passing tests.
   the model is wrong for this league.
 - This remains an ESPN-projection assistant unless you import an expert CSV. It does not
   fetch or claim a particular publisher's consensus automatically.
+- Tier exhaustion and VONA inherit every limit below, since both are computed from the
+  survival vector. They add one of their own: VONA is capped at the top 15 players per
+  position, so a position whose value only recovers deeper than that is understated.
 - **The survival model has not been checked against a real draft.** The effect sizes above
   are from a synthetic board. Run a mock and read the calibration line before trusting the
   odds; that is what it is for.
