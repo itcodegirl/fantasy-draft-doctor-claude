@@ -1,0 +1,31 @@
+# The extension has no build step and no npm dependencies -- the folder IS the
+# extension -- so this workflow checks out the repo and runs the suite directly.
+# There is nothing to install and nothing to cache.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Read-only: this workflow reports, it never writes to the repo.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Report every failing version, not just the first one to fall over.
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      # The glob, not the directory. `node --test tests/` fails on some Node
+      # builds while the expanded file list passes -- see README.
+      - run: node --test tests/*.test.mjs

@@ -202,6 +202,11 @@ node --test tests/store.test.mjs tests/panel.test.mjs tests/session.test.mjs
 
 88 tests.
 
+CI runs the same suite on every push to `main` and every pull request, on Node 20 and
+22 (`.github/workflows/tests.yml`). There is nothing to install first — the folder is
+the extension. Note the workflow passes the **glob**, not the directory: `node --test
+tests/` fails on some Node builds while the expanded file list passes.
+
 **`session.test.mjs` (23)** — the panel's *asynchronous* coordination, run against a fake
 storage with an injected delay so transition windows are real rather than instantaneous:
 a message racing a league switch, the triggering message on adoption, state written under
