@@ -7,11 +7,11 @@
  * bye conflicts are returned separately so the user can disagree with the weighting.
  */
 
+import { analyzeAutodraft, POSITIONS, FLEX_POSITIONS } from './autodraft.js';
+
 const SLOT_TO_POS = {
   0: 'QB', 2: 'RB', 4: 'WR', 6: 'TE', 16: 'DST', 17: 'K', 23: 'FLEX',
 };
-const FLEX_POSITIONS = ['RB', 'WR', 'TE'];
-const POSITIONS = ['QB', 'RB', 'WR', 'TE', 'DST', 'K'];
 
 export function readSlots(lineupSlotCounts) {
   const slots = { QB: 0, RB: 0, WR: 0, TE: 0, DST: 0, K: 0, FLEX: 0, BENCH: 0 };
@@ -118,6 +118,7 @@ export function recommend(input) {
   const {
     players, picks = [], slots, teams, mySlot, myTeamId, scoringValidated,
     unavailablePlayerIds = [], currentPick: observedCurrentPick = 0,
+    autodraftDetection = true,
   } = input;
   if (!scoringValidated) return { error: 'Pass the scoring validation gate before using recommendations.' };
   if (!players || !Object.keys(players).length) return { error: 'Player pool not loaded yet.' };
@@ -139,6 +140,14 @@ export function recommend(input) {
   const available = Object.values(players).filter((p) => !drafted.has(playerId(p))
     && !unavailable.has(playerId(p)) && Number.isFinite(p.proj));
   const { counts, needs } = rosterNeeds(roster, slots);
+  // Teams being autodrafted have knowable future picks, so the players they will take
+  // are gone with near-certainty rather than "probably gone" by ADP. Only high-confidence
+  // teams are projected; see autodraft.js.
+  const autodraft = autodraftDetection
+    ? analyzeAutodraft({ players, picks, slots, teams, currentPick, nextPick })
+    : null;
+  const doomedBy = {};
+  if (autodraft) for (const row of autodraft.projected) doomedBy[String(row.playerId)] = row;
   const baseline = rosterLineupPoints(roster, slots);
   const maxProj = Math.max(...available.map((p) => p.proj), 1);
   const expertRanks = available.map((p) => expertRankFor(input.experts, p)).filter((n) => n != null);
@@ -166,8 +175,13 @@ export function recommend(input) {
     const byeWeek = byeFor(p, input.byeWeeks);
     const byeConflicts = byeWeek == null ? 0 : roster.filter((r) => byeFor(r, input.byeWeeks) === byeWeek).length;
     const positionNeed = Math.min((needs[p.pos] || 0) + (FLEX_POSITIONS.includes(p.pos) ? needs.FLEX || 0 : 0), 2);
-    const lastsToNextTurn = adp == null ? null : adp >= nextPick;
-    const urgency = adp == null ? 0 : clamp((nextPick - adp) / 25, -1, 1);
+    const takenByAutodraft = doomedBy[playerId(p)] || null;
+    // A projected autodraft pick beats the ADP guess outright: one is a simulation of a
+    // deterministic opponent, the other is a league-average tendency.
+    const lastsToNextTurn = takenByAutodraft ? false : (adp == null ? null : adp >= nextPick);
+    const urgency = takenByAutodraft
+      ? 1
+      : (adp == null ? 0 : clamp((nextPick - adp) / 25, -1, 1));
     const projectionScore = (p.proj / maxProj) * 10;
     const fitScore = starterGain * 0.35;
     const consensusComponent = consensusScore * 5;
@@ -180,7 +194,10 @@ export function recommend(input) {
       expertRank, houseScore, byeWeek, byeConflicts, starterGain,
       need: needs[p.pos] || 0, flexNeed: FLEX_POSITIONS.includes(p.pos) ? needs.FLEX || 0 : 0,
       lastsToNextTurn, score: totalScore,
-      why: explain(p, { starterGain, expertRank, houseScore, byeWeek, byeConflicts, positionNeed, lastsToNextTurn, nextPick }),
+      takenByAutodraft: takenByAutodraft
+        ? { teamId: takenByAutodraft.teamId, overallPickNumber: takenByAutodraft.overallPickNumber }
+        : null,
+      why: explain(p, { starterGain, expertRank, houseScore, byeWeek, byeConflicts, positionNeed, lastsToNextTurn, nextPick, takenByAutodraft }),
     };
   }).sort((a, b) => b.score - a.score);
 
@@ -188,6 +205,7 @@ export function recommend(input) {
     currentPick, nextPick, round: Math.ceil(nextPick / Number(teams)),
     roster, counts, needs, scoring: input.scoringSummary || null,
     expertsAvailable: expertRanks.length,
+    autodraft,
     consensusSource: expertRanks.length ? 'imported expert rankings blended with ESPN rank/ADP' : 'house model: ESPN rank + ADP',
     availableCount: available.length,
     recommendations: rows.slice(0, 5),
@@ -199,7 +217,10 @@ function explain(p, f) {
   if (f.expertRank != null) bits.push('expert consensus #' + f.expertRank);
   else if (f.houseScore > 0) bits.push('house rank/ADP signal ' + Math.round(f.houseScore * 100) + '%');
   if (f.positionNeed || (FLEX_POSITIONS.includes(p.pos) && f.positionNeed)) bits.push('fills ' + p.pos + ' need');
-  if (f.lastsToNextTurn === false) bits.push('unlikely to last to pick ' + f.nextPick);
+  if (f.takenByAutodraft) {
+    bits.push('team ' + f.takenByAutodraft.teamId + ' is autodrafting — projected gone at pick '
+      + f.takenByAutodraft.overallPickNumber);
+  } else if (f.lastsToNextTurn === false) bits.push('unlikely to last to pick ' + f.nextPick);
   if (f.byeConflicts) bits.push(f.byeConflicts + ' roster bye conflict' + (f.byeConflicts === 1 ? '' : 's'));
   if (f.byeWeek != null) bits.push('bye week ' + f.byeWeek);
   return bits.join(' · ');
