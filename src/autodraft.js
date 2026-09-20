@@ -103,6 +103,31 @@ export function eligiblePositions(counts, slots) {
   return POSITIONS.filter((pos) => SINGLETON_POSITIONS.indexOf(pos) === -1);
 }
 
+/**
+ * Real-valued unfilled starting demand per position, the same arithmetic
+ * `eligiblePositions` uses expressed as a number rather than a set.
+ *
+ * A boolean "can this team take a WR" is enough to walk a deterministic ranked list, but
+ * a soft opponent model needs to know whether a team wants ONE more WR or two. Counts are
+ * real-valued on purpose: the survival model carries expected roster state forward
+ * through a window, so a team can be 0.4 of the way to filling a slot.
+ *
+ * FLEX is clamped PER POSITION before summing. Summing the deltas first lets a deficit at
+ * one position cancel a surplus at another -- with RB 1/2, WR 4/2, TE 0/1 that reports the
+ * flex as empty when two spare WRs are sitting in it.
+ */
+export function starterDemand(counts, slots) {
+  const demand = {};
+  for (const pos of POSITIONS) {
+    demand[pos] = Math.max(((slots && slots[pos]) || 0) - ((counts && counts[pos]) || 0), 0);
+  }
+  const flexUsed = FLEX_POSITIONS.reduce(
+    (n, pos) => n + Math.max(((counts && counts[pos]) || 0) - ((slots && slots[pos]) || 0), 0), 0,
+  );
+  demand.FLEX = Math.max(((slots && slots.FLEX) || 0) - flexUsed, 0);
+  return demand;
+}
+
 function emptyCounts() {
   return Object.fromEntries(POSITIONS.map((pos) => [pos, 0]));
 }
@@ -317,5 +342,10 @@ export function analyzeAutodraft(input) {
     doomedPlayerIds: survival.doomedPlayerIds,
     unknownPicks: survival.unknownPicks,
     coveredPicks: survival.coveredPicks,
+    // Handed out so the survival model can reuse this replay instead of walking the
+    // whole pick history a second time on every render.
+    countsByTeam: detection.countsByTeam,
+    slotMap: map,
+    draftedPlayerIds: detection.draftedPlayerIds,
   };
 }

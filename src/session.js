@@ -36,9 +36,10 @@
  */
 
 import { createState, deserialize, applySnapshot, observeFrame } from './store.js';
+import { createLog } from './calibration.js';
 import {
   DEFAULT_CONFIG, routeLeague, gatePatch,
-  KEY_ACTIVE, keyState, keyPool, keyConfig, keySnapshot, keySettings,
+  KEY_ACTIVE, keyState, keyPool, keyConfig, keySnapshot, keySettings, keyCalibration,
 } from './panel-logic.js';
 
 export function createSession(opts) {
@@ -50,6 +51,10 @@ export function createSession(opts) {
   let state = createState();
   let pool = {};
   let config = Object.assign({}, DEFAULT_CONFIG);
+  // Installed in the same atomic block as the four above. It is per-league like they are,
+  // and a half-switched session must never score one league's forecasts against another's
+  // picks.
+  let calibration = createLog();
   // Per-league offer context: { leagueId, identity, latest }. The identity message is
   // held SEPARATELY from whatever arrived last. Keeping only "the message that raised
   // the offer" meant a snapshot from the offered league, arriving before the user
@@ -67,6 +72,8 @@ export function createSession(opts) {
     get state() { return state; },
     get pool() { return pool; },
     get config() { return config; },
+    get calibration() { return calibration; },
+    setCalibration(next) { calibration = next; },
     get pendingLeagueOffer() { return offerContext ? offerContext.leagueId : null; },
     get transitioning() { return transitionDepth > 0; },
     get queuedCount() { return queued.length; },
@@ -110,6 +117,7 @@ export function createSession(opts) {
       const put = {};
       put[keyState(activeLeagueId)] = state;
       put[keyConfig(activeLeagueId)] = config;
+      put[keyCalibration(activeLeagueId)] = calibration;
       await storage.set(put);
     } catch (e) { onError(e); }
   }
@@ -133,15 +141,19 @@ export function createSession(opts) {
       state = createState();
       pool = {};
       config = Object.assign({}, DEFAULT_CONFIG);
+      calibration = createLog();
       return;
     }
 
-    const keys = [keyState(id), keyPool(id), keyConfig(id), keySnapshot(id), keySettings(id)];
+    const keys = [keyState(id), keyPool(id), keyConfig(id), keySnapshot(id), keySettings(id),
+      keyCalibration(id)];
     const got = (await storage.get(keys)) || {};
 
     const nextState = got[keys[0]] ? deserialize(got[keys[0]]) : createState();
     const nextPool = got[keys[1]] || {};
     const nextConfig = Object.assign({}, DEFAULT_CONFIG, got[keys[2]] || {});
+    const stored = got[keys[5]];
+    const nextCalibration = stored && Array.isArray(stored.forecasts) ? stored : createLog();
     if (got[keys[4]]) nextConfig.espnSettings = got[keys[4]];
     nextConfig.leagueId = id;
     nextState.leagueId = id;
@@ -168,6 +180,7 @@ export function createSession(opts) {
     state = nextState;
     pool = nextPool;
     config = nextConfig;
+    calibration = nextCalibration;
     // --- end atomic install ---
   }
 
@@ -374,6 +387,11 @@ export function createSession(opts) {
       // import had none left them in memory and then saved them under the imported
       // league's key.
       pool = parsed.pool || {};
+      // A v1 export carries no log. Install an empty one rather than leaving the
+      // previous league's measurements attached to the imported board.
+      calibration = parsed.calibration && Array.isArray(parsed.calibration.forecasts)
+        ? parsed.calibration
+        : createLog();
       // --- end atomic install ---
 
       offerContext = null;

@@ -164,6 +164,156 @@ Known blind spots: a manager who set a pre-draft queue and left autodrafts off *
 list, not ESPN's, and will not be detected. That is a false negative, not a false positive.
 Picks that arrive without a `teamId` cannot be attributed to anyone and are skipped.
 
+### Survival probability, conditioned on opponent needs
+
+Every opponent's unfilled starting slots are derivable from the pick list, so the ~22
+picks between your turns do not have to be guessed at with league-average ADP. The panel
+puts a probability on each candidate: *about 6 in 10 still there at #198 (need-adjusted)*.
+
+This is a **separate channel** from autodraft projection. That one makes a hard claim
+because an autodrafter is deterministic. This one is a probability about a human and is
+never allowed to read as certainty — the numbers are clamped off 0 and 1, and the wording
+uses coarse odds rather than a precise-looking percentage.
+
+Three decisions carry the design:
+
+**Hazard, not density.** A player whose ADP was 20 and who is somehow still on the board
+at pick 40 has a near-zero ADP *density* there — and is the most likely next pick. The
+model weights by the hazard `φ(z)/(1−Φ(z))`, the chance of going now *given* still being
+available, so it is right about exactly the players it matters most about. Above z = 4 an
+asymptotic branch takes over, because the `erf` approximation's own error term is larger
+than the tail it is dividing by.
+
+**Subtract, do not multiply.** Each pick's propensities are normalised to sum to 1, so
+they are unconditional and survival updates as `S -= q`. Exactly one player is consumed
+per pick, and the sum of `(1 − survival)` equals the number of modelled picks *exactly* —
+verified in the tests rather than approached by rescaling.
+
+**Need is a multiplier on market, never a substitute.** A kicker's slot is open from pick
+1, but kickers have an ADP around 150 and the hazard keeps them out of round 3 with no
+special case. A roster with every starter filled gets a uniform multiplier, which cancels
+in normalisation, so that pick falls back to pure market — the right treatment of a
+manager with nothing left to fill, and it falls out rather than being special-cased.
+
+Autodraft picks are **pinned out** of the window rather than modelled inside it. Pinning
+inside the loop would try to consume a whole pick's worth of mass from a player whose
+survival had already been partly eaten, and the sum identity would quietly stop holding.
+
+One correction to the obvious version of this idea: *"a team with two RBs and zero WRs is
+not taking a third RB"* is too strong. While that team's FLEX is open, a third RB is a
+legitimate flex play, and the model says so — RB only drops to the floor once the flex is
+spoken for. The weighting is soft throughout: a filled position is down-weighted to 0.25,
+never to zero, because best-player-available is a real strategy and one such manager must
+not invalidate the whole window.
+
+Measured effect, on a synthetic 12-team board: **8–9 points of survival** when half the
+window is saturated at a position, **~22 points** when all of it is. Real, and not a
+transformation. Cost is **+0.7 ms** on a `recommend()` that took 5.7 ms.
+
+### Is it actually better than ADP?
+
+Unknown, and the tool says so rather than assuming. There is no historical draft data here
+to backtest against, so the model ships with the thing that can settle it.
+
+At each of your turns the panel writes down the 25 lowest-ADP available players, the
+need-conditioned probability, **and the ADP-only probability from the same board**. Once
+the picks arrive it scores both with a Brier score and reports the difference:
+
+> survival model: Brier 0.148 over 74 predictions across 3 of your picks · ADP-only
+> baseline 0.191 (22% better).
+
+A lone Brier score cannot tell you whether conditioning beat ADP; only the comparison can,
+and it needs both numbers captured at the same moment. If the need model loses, the panel
+says that plainly and tells you to treat the odds as ADP. Under three scored picks it
+refuses to report a number at all.
+
+Forecasts are recorded once per target pick — a re-render cannot upgrade a prediction with
+information it did not have when you would have acted on it — and the log is per-league,
+stored under its own key so a local undo cannot erase the measurement record. **Export
+carries the log**, so a mock draft's evidence can be analysed off the draft laptop rather
+than being stranded in one browser profile.
+
+The report is sliceable, because a single aggregate cannot test the claim being made:
+
+- **`byRound`** — conditioning is near-inert in rounds 1–4 by construction, since with
+  every starting slot open the multipliers barely separate. A model that is flat early and
+  positive in the middle rounds is the *claimed* shape and shows up as a mediocre total.
+- **`reliability`** — deciles of predicted probability against observed frequency. A Brier
+  score alone cannot tell a calibrated model from a timid one; never leaving 0.5 scores
+  respectably and says nothing.
+- **`resolution`** — how far the buckets spread from the base rate, i.e. whether the model
+  discriminates at all.
+
+#### Running the mock
+
+One thing will silently ruin the run: **`recommend()` returns early when the scoring gate
+is unpassed**, before any forecast is opened. Record the gate on the mock league first, or
+you will draft sixteen rounds and end with an empty log. The panel now says so in place
+while the gate is open.
+
+Also set your team id and draft slot, and keep the panel open at every one of your turns —
+a forecast is opened on render, once per target pick, first write wins. A turn you did not
+render is a turn not scored.
+
+Two things falsify the models faster than the score does. If the panel names an
+autodrafting team and its next pick is *not* the player shown, the eligibility model is
+wrong for that league. If the survival line reads *"ADP only — opponent rosters not
+usable"* for most of the draft, attribution failed and the need model never ran — that is a
+data problem, not a result.
+
+### Tier exhaustion and VONA
+
+Two questions the board can now answer that "who is the best player left" cannot:
+
+> waiting costs most at RB: about 37 projected points between Ace RB and whoever is left
+> at #198. About 78 in 100 that all 4 remaining RB tier-3 players are gone before #198.
+
+**VONA** (Value Over Next Available) is the drop-off between the best player at a position
+now and the best one expected to survive to your turn. That is the question a draft
+actually asks — not who is best, but at which position you lose the most by waiting. Note
+the replacement level cancels: VONA is a difference of values at the same position, so
+shifting both by a baseline leaves it unchanged, which is why this needs no
+replacement-level machinery.
+
+**Tier exhaustion** is the chance an entire tier empties before you pick. Tiers are
+gap-based and deterministic (an EM or GMM fit gives different tiers run to run, and a
+board whose tiers move while you read it is worse than no tiers), and they are computed
+over the full position list so a tier keeps its identity as the board empties.
+
+#### The joint problem, and one wrong turn worth documenting
+
+Both are **joint** questions about a set of players, and both are usually answered by
+multiplying individual survival probabilities. Survivals in a draft are negatively
+correlated — the players compete for the same finite set of picks, so if one lasts the
+others are likelier to last too.
+
+The survival model says player *j* is taken with probability `p_j = 1 − S_j`, and by its
+sum-to-K identity those add to exactly the window length. The joint consistent with that
+is **conditional Bernoulli**: independent indicators conditioned on the total coming out at
+K. Conditioning is what carries the correlation — one player going uses up one of the K
+picks, making everyone else likelier to last.
+
+```
+P(all of S gone | total = K) = ∏ p_j · P(N_rest = K − |S|) / P(N_all = K)
+```
+
+Both terms are Poisson-binomial dynamic programs: exact, deterministic, no sampling.
+
+The wrong turn, recorded because it looks equally principled: decomposing over **picks**
+instead — "the chance pick *n* lands in this set is the sum of its propensities, so the
+count is a Poisson-binomial over picks." For a single player that gives
+`1 − ∏(1 − qₙ)` where the model says the answer is `Σqₙ`, so it does not reproduce the
+marginals it was built from, and it understates badly. Measured against the correct form
+it was wrong by up to 35 points.
+
+Having fixed it, the honest result is that **the correlation correction is about one
+point**, not thirty-five. The independence product was a decent approximation; this is the
+exact one and costs little.
+
+Cost is **+2.7 ms**. Written naively — a fresh array per player inside the DP — it was
+56 ms per render; reusing two buffers and skipping the complement in place brought it to
+2.9 ms.
+
 ---
 
 ## Draft-day sequence
@@ -243,7 +393,7 @@ and `sidePanel` only.
 node --test tests/*.test.mjs
 ```
 
-111 tests. (Passing the directory rather than the glob fails on some Node builds.)
+176 tests. (Passing the directory rather than the glob fails on some Node builds.)
 
 CI runs the same suite on every push to `main` and every pull request, on Node 20 and
 22 (`.github/workflows/tests.yml`). There is nothing to install first — the folder is
@@ -267,6 +417,27 @@ snapshot idempotency, metadata absorption on agreement, whole-snapshot staleness
 **`panel-logic.js` and `recommender.js`** — export/import round-trip with the pool intact,
 freshness read from completion time rather than apply time, league routing, scoring-gated
 next-pick ranking, expert CSV matching, roster needs, snake picks, and bye-week conflicts.
+
+**`survival.js` (20) and `calibration.js` (11)** — the hazard monotone across its whole
+range and both branches agreeing where they meet; a faller's hazard far exceeding an
+at-ADP player's; exactly one player consumed per modelled pick; no probability escaping
+the clamp; an all-starters-filled roster coming out byte-identical to the ADP-only model;
+survival moving the direction roster state implies; a saturated position still gettable;
+a pinned autodraft pick leaving the window rather than being modelled in it; zero
+attribution degrading exactly to ADP-only; one conflicted slot disabling conditioning for
+that pick alone; rank never substituted for a missing ADP; and order-independence. For
+calibration: first-forecast-wins, the boundary where a player taken *at* your pick counts
+as having survived, a gapped board refusing to settle, positive and negative skill, and an
+empty log reporting no score rather than a perfect one. `starterDemand` is checked against
+`eligiblePositions` over an exhaustive grid — two need models drifting apart is the exact
+disease `phase3-wip` carries.
+
+**`scarcity.js` (12)** — the count distribution against a hand-computed Poisson-binomial;
+conditioning reproducing `P(taken | exactly one taken) = 0.28/0.47` rather than the
+unconditional `0.5`; a set larger than the window never exhausting; exhaustion falling as
+the set grows; no tier ever reported as certainly gone; the layer-cake expectation matched
+by hand; VONA never negative; tier cuts landing on a real cliff and staying deterministic;
+and players the survival model could not price left out rather than guessed.
 
 **`autodraft.js` (17)** — slot inversion against the snake, slot maps built from a later
 round when the first is unattributed, the positional filter that overall-rank matching
@@ -298,5 +469,23 @@ which is how six defects shipped while `store.js` had twenty passing tests.
   the model is wrong for this league.
 - This remains an ESPN-projection assistant unless you import an expert CSV. It does not
   fetch or claim a particular publisher's consensus automatically.
+- Tier exhaustion and VONA inherit every limit below, since both are computed from the
+  survival vector. They add one of their own: VONA is capped at the top 15 players per
+  position, so a position whose value only recovers deeper than that is understated.
+- **The survival model has not been checked against a real draft.** The effect sizes above
+  are from a synthetic board. Run a mock and read the calibration line before trusting the
+  odds; that is what it is for.
+- The opponent-need model is **reasoned from ESPN's roster rules, not measured**, like the
+  autodraft eligibility model it builds on.
+- Opponent roster state is carried through the window as an **expectation** (real-valued
+  counts fed to a non-linear need function), which understates variance.
+- The ADP spread fit is **inherited from `phase3-wip` and is not measured in this
+  repository**. `adpStdev` is honoured if ESPN ever supplies it; it currently does not.
+- Manual picks for opposing teams carry **no team id**, so they cannot be attributed. The
+  model scales conditioning down by the share of picks it could attribute, and at zero
+  attribution degrades exactly to the ADP-only forecast.
+- Live-auto picks carry a **synthesized overall pick number** until REST reconciles, so a
+  slot can be mis-mapped. A slot whose team id disagreed between picks is dropped from
+  conditioning for its picks only, not globally.
 - Disney's Terms of Use prohibit automated access. Absence of documented enforcement is
   not permission.
