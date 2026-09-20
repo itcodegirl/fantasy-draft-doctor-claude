@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildExport, parseImport, freshness, routeLeague, gatePatch, GATES,
-  keyState, keyPool, keyConfig, keySnapshot, DEFAULT_CONFIG, autodraftSummary, survivalPhrase, survivalSummary, scarcitySummary } from '../src/panel-logic.js';
+  keyState, keyPool, keyConfig, keySnapshot, DEFAULT_CONFIG, autodraftSummary, survivalPhrase, survivalSummary, scarcitySummary, staleBoardBlock, ABANDONED_AFTER_MS } from '../src/panel-logic.js';
 import { createState, applySnapshot, manualPick, confirmedCount } from '../src/store.js';
 
 // ------------------------------------------------------------------- export
@@ -310,4 +310,47 @@ test('a malformed calibration block is refused rather than half-imported', () =>
   const payload = buildExport(42, { leagueId: 42 }, null, {}, 'now', { forecasts: 'not an array' });
   assert.equal(payload.calibration, null);
   assert.equal(parseImport({ leagueId: 42, calibration: { nope: true } }).calibration, null);
+});
+
+const HOUR = 3600000;
+const boardAged = (ms) => ({ leagueId: 1141883482, lastSnapshotCompletedAt: 1_000_000_000_000 - ms });
+const NOW = 1_000_000_000_000;
+
+test('a sync hiccup and an abandoned board are no longer the same thing', () => {
+  // They used to be. Ninety seconds behind and thirteen days behind both printed
+  // "sync stale" next to a full set of confident recommendations.
+  assert.equal(freshness(boardAged(30_000), NOW).status, 'live');
+  assert.equal(freshness(boardAged(5 * 60_000), NOW).status, 'stale');
+  assert.equal(freshness(boardAged(7 * HOUR), NOW).status, 'abandoned');
+});
+
+test('a board from another draft blocks the recommendations entirely', () => {
+  // The real case: the panel open on a Yahoo draft, still holding an ESPN league from
+  // thirteen days earlier, rendering picks for round 17 while the user was in round 2.
+  const block = staleBoardBlock(boardAged(13 * 24 * HOUR), { syncPaused: false }, NOW);
+  assert.ok(block, 'a thirteen-day-old board must not render recommendations');
+  assert.match(block.text, /13 days ago/);
+  assert.match(block.text, /league 1141883482/, 'name the league so the mismatch is obvious');
+  assert.match(block.remedy, /Manual mode/);
+});
+
+test('ages are reported in hours until they are better read as days', () => {
+  assert.match(staleBoardBlock(boardAged(9 * HOUR), {}, NOW).text, /9 hours ago/);
+  assert.match(staleBoardBlock(boardAged(50 * HOUR), {}, NOW).text, /2 days ago/);
+});
+
+test('manual mode is exempt, because a hand-entered board has no snapshot by design', () => {
+  // Refusing here would break the documented fallback for when live sync fails.
+  assert.equal(staleBoardBlock(boardAged(13 * 24 * HOUR), { syncPaused: true }, NOW), null);
+});
+
+test('a board that never synced at all is exempt, not blocked', () => {
+  // Offline manual drafting is a supported mode, not a stale board.
+  assert.equal(staleBoardBlock({ leagueId: 5, lastSnapshotCompletedAt: null }, {}, NOW), null);
+  assert.equal(staleBoardBlock(null, {}, NOW), null);
+});
+
+test('a live board is never blocked', () => {
+  assert.equal(staleBoardBlock(boardAged(20_000), {}, NOW), null);
+  assert.equal(staleBoardBlock(boardAged(ABANDONED_AFTER_MS - 60_000), {}, NOW), null);
 });

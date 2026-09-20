@@ -112,16 +112,61 @@ export function parseImport(raw) {
 }
 
 /**
+ * Past this age the board is not a sync hiccup, it is a different draft. Longer than any
+ * real draft runs, short enough that yesterday's board cannot masquerade as today's.
+ */
+export const ABANDONED_AFTER_MS = 6 * 60 * 60 * 1000;
+
+/**
  * Sync freshness. Reads lastSnapshotCompletedAt -- when the snapshot actually
  * completed -- not when it was applied. Applying a cached snapshot on panel reopen
  * previously made an offline board announce itself as just-confirmed.
+ *
+ * `stale` and `abandoned` are deliberately separate. Ninety seconds behind during a live
+ * draft is a hiccup you work through; thirteen days behind is last month's league still
+ * sitting in storage, and the two were previously indistinguishable -- both printed
+ * "sync stale" beside a full set of confident recommendations.
  */
-export function freshness(state, nowMs, staleAfterMs = 90000) {
+export function freshness(state, nowMs, staleAfterMs = 90000, abandonedAfterMs = ABANDONED_AFTER_MS) {
   const at = state ? state.lastSnapshotCompletedAt : null;
   if (!at) return { status: 'offline', ageMs: null, label: 'offline — manual entry' };
   const ageMs = nowMs - at;
+  if (ageMs > abandonedAfterMs) {
+    return { status: 'abandoned', ageMs: ageMs, label: 'stale board — not this draft' };
+  }
   if (ageMs > staleAfterMs) return { status: 'stale', ageMs: ageMs, label: 'sync stale' };
   return { status: 'live', ageMs: ageMs, label: 'synced' };
+}
+
+/**
+ * Whether the recommendation panel must refuse to render.
+ *
+ * Opening the panel on a page this extension cannot read -- another platform's draft, or
+ * any site at all -- leaves the last league loaded from storage, and every number on
+ * screen then describes a draft the user is not in. The board does not know which page it
+ * is on; what it does know is that nothing has confirmed a pick in hours. That is enough.
+ *
+ * Manual mode is EXEMPT. A hand-entered board legitimately has no recent snapshot, and
+ * refusing there would break the documented fallback for when live sync fails. Manual mode
+ * is a deliberate act; a forgotten league is not.
+ */
+export function staleBoardBlock(state, config, nowMs, abandonedAfterMs = ABANDONED_AFTER_MS) {
+  if (config && config.syncPaused) return null;
+  const f = freshness(state, nowMs, 90000, abandonedAfterMs);
+  if (f.status !== 'abandoned') return null;
+  const leagueId = state && state.leagueId != null ? state.leagueId : null;
+  const hours = Math.floor(f.ageMs / 3600000);
+  const age = hours >= 48 ? Math.floor(hours / 24) + ' days' : hours + ' hours';
+  return {
+    ageMs: f.ageMs,
+    leagueId: leagueId,
+    text: 'This board was last confirmed ' + age + ' ago'
+      + (leagueId != null ? ', for league ' + leagueId : '')
+      + '. Recommendations are hidden because that is almost certainly a different draft'
+      + ' from the one you are looking at.',
+    remedy: 'Open this league’s ESPN draft room to start a fresh board, or turn on'
+      + ' Manual mode to enter picks by hand.',
+  };
 }
 
 /**
