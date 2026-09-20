@@ -367,6 +367,16 @@ draft connections are relayed at all. Reading a module-level "current league" do
 was wrong: an older socket can emit after a newer one changed it, and async Blob decoding
 delays delivery further. A frame without connection identity is dropped, not guessed at.
 
+**A board nobody has confirmed in hours is refused, not displayed.** Opening the panel on
+a page this extension cannot read — another platform's draft room, or any site at all —
+leaves the last league loaded from storage, and every number then describes a draft you
+are not in. This happened live: the panel sat open on a Yahoo draft showing an ESPN
+league from thirteen days earlier, recommending for round 17 while the room was in round
+2, behind a one-line `sync stale` nobody reads. Freshness now separates a hiccup from an
+abandoned board, and past six hours the recommendations refuse to render and name the
+league they belong to. Manual mode is exempt — a hand-entered board legitimately has no
+recent snapshot, and refusing there would break the fallback for when live sync fails.
+
 **Manual mode is a real switch.** When on, the session refuses live snapshots and
 observations at the door. It is not a display filter.
 
@@ -393,7 +403,7 @@ and `sidePanel` only.
 node --test tests/*.test.mjs
 ```
 
-176 tests. (Passing the directory rather than the glob fails on some Node builds.)
+182 tests. (Passing the directory rather than the glob fails on some Node builds.)
 
 CI runs the same suite on every push to `main` and every pull request, on Node 20 and
 22 (`.github/workflows/tests.yml`). There is nothing to install first — the folder is
@@ -487,5 +497,11 @@ which is how six defects shipped while `store.js` had twenty passing tests.
 - Live-auto picks carry a **synthesized overall pick number** until REST reconciles, so a
   slot can be mis-mapped. A slot whose team id disagreed between picks is dropped from
   conditioning for its picks only, not globally.
+- **ESPN only.** The sensor layer is ESPN-shaped throughout: `content.js` reads
+  `lm-api-reads.fantasy.espn.com`, `hook.js` matches ESPN's `JOIN` socket and its
+  `SELECTED <teamId> <playerId> <slotId>` frames, `store.js` validates ESPN's D/ST id
+  band, and `readSlots` maps ESPN's numeric slot ids. Yahoo and Sleeper would each need a
+  platform adapter, not a manifest entry. The modelling stack above the sensor is already
+  platform-agnostic and would port unchanged.
 - Disney's Terms of Use prohibit automated access. Absence of documented enforcement is
   not permission.

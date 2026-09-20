@@ -146,6 +146,7 @@ select { flex: 0 0 84px; }
 .recommend-survival { flex: 1 1 100%; padding-left: 41px; color: var(--muted); font-size: 11px; }
 .calibration-note { color: var(--muted); }
 .scarcity-note { color: var(--accent); }
+.stale-board { color: var(--alert); font-weight: 600; }
 
 .conflict { padding: 7px 0; border-bottom: 1px solid var(--alert-line); }
 .conflict:last-child { border-bottom: none; }

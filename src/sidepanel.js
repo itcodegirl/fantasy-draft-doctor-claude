@@ -12,7 +12,7 @@ import {
 } from './store.js';
 import {
   buildExport, parseImport, freshness, autodraftSummary, survivalPhrase, survivalSummary,
-  scarcitySummary,
+  scarcitySummary, staleBoardBlock,
 } from './panel-logic.js';
 import {
   selectForecastPlayers, openForecast, recordForecast, settleForecasts, brierReport,
@@ -239,6 +239,27 @@ function renderRecommendations() {
   list.textContent = '';
   note.textContent = '';
   const c = config();
+
+  // Before anything is computed. Opening the panel on a page this extension cannot read
+  // leaves the last league loaded from storage, and every number below would then describe
+  // a draft the user is not in -- confidently, with a full recommendation list, behind a
+  // one-line "sync stale" nobody reads. Refuse instead of rendering.
+  const blocked = staleBoardBlock(state(), c, now());
+  if (blocked) {
+    box.hidden = false;
+    note.textContent = blocked.remedy;
+    const warn = document.createElement('div');
+    warn.className = 'empty stale-board';
+    warn.textContent = blocked.text;
+    list.appendChild(warn);
+    $('recommendPick').textContent = '';
+    $('autodraftNote').hidden = true;
+    $('survivalNote').hidden = true;
+    $('scarcityNote').hidden = true;
+    $('calibrationNote').hidden = true;
+    return;
+  }
+
   const settings = c.espnSettings;
   const picks = sortedPicks(state());
   const unavailablePlayerIds = provisionalPlayerIds();
