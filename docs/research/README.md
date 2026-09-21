@@ -55,9 +55,20 @@ and live API responses — is **deliberately not committed**. It is ~2.2 MB of b
 live in history permanently, and it contains a third party's copyrighted page content and
 product imagery.
 
-It is kept locally as `statsdeck-crawl-data.zip`. The reports cite specific files inside it by
-name (`extractions/live-league-probes.json`, `extractions/showcase-extractions.jsonl`, and so
-on), so the references still resolve if the archive is ever attached.
+It lives here instead:
+
+```
+C:\Users\itcod\OneDrive\research\statsdeck-2026-09-20\statsdeck-crawl-data.zip
+```
+
+OneDrive rather than the repo root deliberately — `git clean -xdf` removes ignored files, and
+this is a dated snapshot of a site that will change. The reports' findings are pinned to *this*
+capture; re-crawling later produces a different one. The date is in the folder name so a future
+capture can sit beside it for comparison rather than overwrite it.
+
+The reports cite specific files inside the archive by name — `extractions/live-league-probes.json`,
+`extractions/showcase-extractions.jsonl`, `pages/index.html` and so on — so those references
+resolve once it's unzipped. Its own `README.md` documents the capture method for each folder.
 
 ## Note on identifiers
 
