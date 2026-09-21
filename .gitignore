@@ -10,3 +10,7 @@ node_modules/
 *.log
 .DS_Store
 Thumbs.db
+
+# Competitive-research capture archives — large, and contain third-party page content.
+statsdeck-crawl-data.zip
+docs/research/**/*.zip
